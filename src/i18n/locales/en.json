@@ -510,6 +510,8 @@
     "filter_gemini": "Gemini",
     "filter_gemini-cli": "GeminiCLI",
     "filter_kimi": "Kimi",
+    "filter_github": "GitHub Copilot",
+    "filter_github-copilot": "GitHub Copilot",
     "filter_aistudio": "AIStudio",
     "filter_claude": "Claude",
     "filter_codex": "Codex",
@@ -676,6 +678,18 @@
     "limit_window": "{{duration}} limit",
     "limit_index": "Limit #{{index}}",
     "reset_hint": "resets in {{hint}}"
+  },
+  "github_copilot_quota": {
+    "title": "GitHub Copilot Status",
+    "empty_title": "No GitHub Copilot Auth Files",
+    "empty_desc": "Login with GitHub Copilot to view status.",
+    "idle": "Not loaded. Click Refresh Button.",
+    "loading": "Checking status...",
+    "load_failed": "Failed to check status: {{message}}",
+    "missing_auth_index": "Auth file missing auth_index",
+    "access_granted": "Access Granted",
+    "plan_label": "Plan: {{sku}}",
+    "expires_at": "Expires: {{time}}"
   },
   "vertex_import": {
     "title": "Vertex JSON Login",

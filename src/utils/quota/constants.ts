@@ -42,6 +42,14 @@ export const TYPE_COLORS: Record<string, TypeColorSet> = {
     light: { bg: '#e0f7fa', text: '#006064' },
     dark: { bg: '#004d40', text: '#80deea' },
   },
+  'github-copilot': {
+    light: { bg: '#f3e5f5', text: '#4a148c' },
+    dark: { bg: '#4a148c', text: '#e1bee7' }
+  },
+  github: {
+    light: { bg: '#f3e5f5', text: '#4a148c' },
+    dark: { bg: '#4a148c', text: '#e1bee7' }
+  },
   iflow: {
     light: { bg: '#f3e5f5', text: '#7b1fa2' },
     dark: { bg: '#4a148c', text: '#ce93d8' },
@@ -193,4 +201,16 @@ export const KIMI_USAGE_URL = 'https://api.kimi.com/coding/v1/usages';
 
 export const KIMI_REQUEST_HEADERS = {
   Authorization: 'Bearer $TOKEN$',
+};
+
+// GitHub Copilot API configuration
+export const GITHUB_COPILOT_TOKEN_URL = 'https://api.github.com/copilot_internal/v2/token';
+export const GITHUB_COPILOT_USER_URL = 'https://api.github.com/copilot_internal/user';
+
+export const GITHUB_COPILOT_REQUEST_HEADERS = {
+  Authorization: 'token $TOKEN$',
+  Accept: 'application/json',
+  'User-Agent': 'GithubCopilot/1.0',
+  'Editor-Version': 'vscode/1.100.0',
+  'Editor-Plugin-Version': 'copilot/1.300.0'
 };

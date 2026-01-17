@@ -28,6 +28,7 @@ import type {
   GeminiCliUserTier,
   KimiQuotaRow,
   KimiQuotaState,
+  GithubCopilotQuotaState
 } from '@/types';
 import { apiCallApi, authFilesApi, getApiCallErrorMessage } from '@/services/api';
 import { useQuotaStore } from '@/stores';
@@ -74,14 +75,17 @@ import {
   isGeminiCliFile,
   isKimiFile,
   isRuntimeOnlyAuthFile,
+  isGithubCopilotFile,
+  GITHUB_COPILOT_TOKEN_URL,
+  GITHUB_COPILOT_USER_URL,
+  GITHUB_COPILOT_REQUEST_HEADERS
 } from '@/utils/quota';
 import { normalizeAuthIndex } from '@/utils/usage';
 import type { QuotaRenderHelpers } from './QuotaCard';
 import styles from '@/pages/QuotaPage.module.scss';
 
 type QuotaUpdater<T> = T | ((prev: T) => T);
-
-type QuotaType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'kimi';
+type QuotaType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'kimi' | 'github-copilot';
 
 const DEFAULT_ANTIGRAVITY_PROJECT_ID = 'bamboo-precept-lgxtn';
 const geminiCliSupplementaryRequestIds = new Map<string, number>();
@@ -96,11 +100,13 @@ export interface QuotaStore {
   codexQuota: Record<string, CodexQuotaState>;
   geminiCliQuota: Record<string, GeminiCliQuotaState>;
   kimiQuota: Record<string, KimiQuotaState>;
+  githubCopilotQuota: Record<string, GithubCopilotQuotaState>;
   setAntigravityQuota: (updater: QuotaUpdater<Record<string, AntigravityQuotaState>>) => void;
   setClaudeQuota: (updater: QuotaUpdater<Record<string, ClaudeQuotaState>>) => void;
   setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;
   setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
+  setGithubCopilotQuota: (updater: QuotaUpdater<Record<string, GithubCopilotQuotaState>>) => void;
   clearQuotaCache: () => void;
 }
 
@@ -668,6 +674,80 @@ const fetchGeminiCliQuota = async (
   };
 };
 
+const fetchGithubCopilotQuota = async (
+  file: AuthFileItem,
+  t: TFunction
+): Promise<GithubCopilotQuotaState> => {
+  const rawAuthIndex = file['auth_index'] ?? file.authIndex;
+  const authIndex = normalizeAuthIndex(rawAuthIndex);
+  if (!authIndex) {
+    throw new Error(t('github_copilot_quota.missing_auth_index'));
+  }
+
+  // 1. Fetch Token (verify auth & get expiry)
+  const tokenResult = await apiCallApi.request({
+    authIndex,
+    method: 'GET',
+    url: GITHUB_COPILOT_TOKEN_URL,
+    header: GITHUB_COPILOT_REQUEST_HEADERS
+  });
+
+  if (tokenResult.statusCode < 200 || tokenResult.statusCode >= 300) {
+    throw createStatusError(getApiCallErrorMessage(tokenResult), tokenResult.statusCode);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let tokenData: any = tokenResult.body;
+  if (typeof tokenData === 'string') {
+    try {
+      tokenData = JSON.parse(tokenData);
+    } catch {
+      throw new Error(t('common.unknown_error'));
+    }
+  }
+
+  if (!tokenData || typeof tokenData !== 'object') {
+    throw new Error(t('common.unknown_error'));
+  }
+
+  // 2. Fetch User Usage (optional, for quota details)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let snapshots: any;
+  try {
+    const userResult = await apiCallApi.request({
+      authIndex,
+      method: 'GET',
+      url: GITHUB_COPILOT_USER_URL,
+      header: GITHUB_COPILOT_REQUEST_HEADERS
+    });
+
+    if (userResult.statusCode === 200) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let userData: any = userResult.body;
+      if (typeof userData === 'string') {
+        try {
+          userData = JSON.parse(userData);
+        } catch {
+          // ignore parsing error for optional data
+        }
+      }
+      if (userData && typeof userData === 'object') {
+        snapshots = userData.quota_snapshots;
+      }
+    }
+  } catch {
+    // Ignore usage fetch errors
+  }
+
+  return {
+    status: 'success',
+    user: tokenData.user,
+    expiresAt: tokenData.expires_at ? new Date(tokenData.expires_at * 1000).toISOString() : undefined,
+    sku: tokenData.sku,
+    snapshots
+  };
+};
+
 const renderAntigravityItems = (
   quota: AntigravityQuotaState,
   t: TFunction,
@@ -1088,6 +1168,97 @@ export const CLAUDE_CONFIG: QuotaConfig<
   renderQuotaItems: renderClaudeItems,
 };
 
+const renderGithubCopilotItems = (
+  quota: GithubCopilotQuotaState,
+  t: TFunction,
+  helpers: QuotaRenderHelpers
+): ReactNode => {
+  const { styles: styleMap } = helpers;
+  const { createElement: h } = React;
+
+  if (quota.status === 'error') {
+     return h('div', { className: styleMap.quotaMessage }, quota.error);
+  }
+
+  // We don't really have quota info for GitHub Copilot, just subscription status
+  // So we display a simple status message based on whether we successfully fetched the token
+  
+  const statusLabel = t('github_copilot_quota.access_granted');
+  const expiresLabel = quota.expiresAt ? t('github_copilot_quota.expires_at', { time: new Date(quota.expiresAt).toLocaleString() }) : '';
+  const skuLabel = quota.sku ? t('github_copilot_quota.plan_label', { sku: quota.sku }) : '';
+
+  return h(
+    'div',
+    { className: styleMap.quotaRow },
+    h(
+        'div',
+        { className: styleMap.quotaRowHeader },
+        h('span', { className: styleMap.quotaModel }, statusLabel),
+        h(
+          'div',
+          { className: styleMap.quotaMeta },
+           skuLabel ? h('span', { className: styleMap.quotaAmount, style: { marginRight: '8px' } }, skuLabel) : null,
+           h('span', { className: styleMap.quotaReset }, expiresLabel)
+        )
+    ),
+    // Render usage bars if snapshots exist
+    quota.snapshots ? (
+      h(React.Fragment, null, 
+        ['chat', 'completions', 'premium_interactions'].map(key => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const detail = (quota.snapshots as any)[key];
+          if (!detail) return null;
+          
+          const labelRaw = key === 'premium_interactions' ? 'Premium' : key;
+          const label = labelRaw.charAt(0).toUpperCase() + labelRaw.slice(1);
+
+          if (detail.unlimited) {
+             return h('div', { key, className: styleMap.quotaSubRow, style: { marginTop: 8 } },
+                h('div', { className: styleMap.quotaRowHeader, style: { fontSize: '0.9em', marginBottom: 2 } },
+                  h('span', { className: styleMap.quotaModel }, label),
+                  h('span', { className: styleMap.quotaPercent }, "Unlimited")
+                ),
+                h('div', { className: styleMap.quotaBar },
+                  h('div', {
+                    className: `${styleMap.quotaBarFill} ${styleMap.quotaBarFillHigh}`,
+                    style: { width: '100%' }
+                  })
+                )
+             );
+          }
+          
+          const percentRemaining = detail.percent_remaining !== undefined 
+            ? Math.round(detail.percent_remaining)
+            : 0;
+          const percentUsed = 100 - percentRemaining;
+          
+          let fillClass = styleMap.quotaBarFillHigh;
+          if (percentUsed >= 80) fillClass = styleMap.quotaBarFillLow;
+          else if (percentUsed >= 50) fillClass = styleMap.quotaBarFillMedium;
+            
+          return h('div', { key, className: styleMap.quotaSubRow, style: { marginTop: 8 } },
+            h('div', { className: styleMap.quotaRowHeader, style: { fontSize: '0.9em', marginBottom: 2 } },
+              h('span', { className: styleMap.quotaModel }, label),
+              h('span', { className: styleMap.quotaPercent }, `${percentUsed}% Used`)
+            ),
+            h('div', { className: styleMap.quotaBar },
+              h('div', {
+                className: `${styleMap.quotaBarFill} ${fillClass}`,
+                style: { width: `${percentUsed}%` }
+              })
+            )
+          );
+        })
+      )
+    ) : (
+      // Dummy progress bar full to indicate active if no snapshots
+      h('div', { className: styleMap.quotaProgressBar }, 
+          h('div', { className: styleMap.quotaProgressFill, style: { width: '100%', backgroundColor: '#4caf50' } })
+      )
+    )
+  );
+};
+
 export const ANTIGRAVITY_CONFIG: QuotaConfig<AntigravityQuotaState, AntigravityQuotaGroup[]> = {
   type: 'antigravity',
   i18nPrefix: 'antigravity_quota',
@@ -1288,4 +1459,25 @@ export const KIMI_CONFIG: QuotaConfig<KimiQuotaState, KimiQuotaRow[]> = {
   controlClassName: styles.kimiControl,
   gridClassName: styles.kimiGrid,
   renderQuotaItems: renderKimiItems,
+};
+
+export const GITHUB_COPILOT_CONFIG: QuotaConfig<GithubCopilotQuotaState, GithubCopilotQuotaState> = {
+  type: 'github-copilot',
+  i18nPrefix: 'github_copilot_quota',
+  filterFn: (file) => isGithubCopilotFile(file),
+  fetchQuota: fetchGithubCopilotQuota,
+  storeSelector: (state) => state.githubCopilotQuota,
+  storeSetter: 'setGithubCopilotQuota',
+  buildLoadingState: () => ({ status: 'loading' }),
+  buildSuccessState: (state) => state,
+  buildErrorState: (message, status) => ({
+    status: 'error',
+    error: message,
+    errorStatus: status
+  }),
+  cardClassName: styles.githubCopilotCard,
+  controlsClassName: styles.githubCopilotControls,
+  controlClassName: styles.githubCopilotControl,
+  gridClassName: styles.githubCopilotGrid,
+  renderQuotaItems: renderGithubCopilotItems
 };

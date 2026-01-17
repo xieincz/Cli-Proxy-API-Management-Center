@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
-import { useAuthStore } from '@/stores';
+import { useAuthStore, useConfigStore } from '@/stores';
 import { authFilesApi, configFileApi } from '@/services/api';
 import {
   QuotaSection,
@@ -13,7 +13,8 @@ import {
   CLAUDE_CONFIG,
   CODEX_CONFIG,
   GEMINI_CLI_CONFIG,
-  KIMI_CONFIG
+  KIMI_CONFIG,
+  GITHUB_COPILOT_CONFIG
 } from '@/components/quota';
 import type { AuthFileItem } from '@/types';
 import styles from './QuotaPage.module.scss';
@@ -21,6 +22,14 @@ import styles from './QuotaPage.module.scss';
 export function QuotaPage() {
   const { t } = useTranslation();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const serverVersion = useAuthStore((state) => state.serverVersion);
+  const isPlus = serverVersion?.includes('-plus') ?? false;
+
+  useEffect(() => {
+    if (!serverVersion) {
+      useConfigStore.getState().fetchConfig(undefined, true).catch(() => {});
+    }
+  }, [serverVersion]);
 
   const [files, setFiles] = useState<AuthFileItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,6 +110,14 @@ export function QuotaPage() {
         loading={loading}
         disabled={disableControls}
       />
+      {isPlus && (
+        <QuotaSection
+          config={GITHUB_COPILOT_CONFIG}
+          files={files}
+          loading={loading}
+          disabled={disableControls}
+        />
+      )}
     </div>
   );
 }
