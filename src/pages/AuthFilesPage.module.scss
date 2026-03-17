@@ -173,6 +173,17 @@
   min-width: 220px;
 }
 
+.filterActionsItem {
+  min-width: 260px;
+}
+
+.filterActionButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+  align-items: center;
+}
+
 .filterToggle {
   display: flex;
   align-items: center;

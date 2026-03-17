@@ -130,6 +130,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     goToPrev,
     goToNext,
     loading: sectionLoading,
+    loadingScope,
     setLoading
   } = useQuotaPagination(filteredFiles);
 
@@ -168,6 +169,11 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     pendingQuotaRefreshRef.current = true;
     void triggerHeaderRefresh();
   }, []);
+
+  const handleRefreshAll = useCallback(() => {
+    if (filteredFiles.length === 0) return;
+    void loadQuota(filteredFiles, 'all', setLoading);
+  }, [filteredFiles, loadQuota, setLoading]);
 
   useEffect(() => {
     const wasLoading = prevFilesLoadingRef.current;
@@ -214,6 +220,8 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
   );
 
   const isRefreshing = sectionLoading || loading;
+  const isRefreshingAll = sectionLoading && loadingScope === 'all';
+  const isCodexSection = config.type === 'codex';
 
   return (
     <Card
@@ -242,6 +250,19 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
               {t('auth_files.view_mode_all')}
             </Button>
           </div>
+          {isCodexSection && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRefreshAll}
+              disabled={disabled || isRefreshing}
+              loading={isRefreshingAll}
+              title={t('quota_management.refresh_codex_all')}
+              aria-label={t('quota_management.refresh_codex_all')}
+            >
+              {t('quota_management.refresh_codex_all')}
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"

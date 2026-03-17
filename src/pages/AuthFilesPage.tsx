@@ -22,11 +22,13 @@ import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { copyToClipboard } from '@/utils/clipboard';
+import { resolveCodexPlanType } from '@/utils/quota';
 import {
   MAX_CARD_PAGE_SIZE,
   MIN_CARD_PAGE_SIZE,
   QUOTA_PROVIDER_TYPES,
   clampCardPageSize,
+  getAuthFileStatusMessage,
   getTypeColor,
   getTypeLabel,
   hasAuthFileStatusMessage,
@@ -63,7 +65,7 @@ import {
   writeAuthFilesUiState,
   type AuthFilesSortMode,
 } from '@/features/authFiles/uiState';
-import { useAuthStore, useNotificationStore, useThemeStore } from '@/stores';
+import { useAuthStore, useNotificationStore, useQuotaStore, useThemeStore } from '@/stores';
 import type { AuthFileItem } from '@/types';
 import styles from './AuthFilesPage.module.scss';
 
@@ -99,6 +101,7 @@ export function AuthFilesPage() {
   const showNotification = useNotificationStore((state) => state.showNotification);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const resolvedTheme: ResolvedTheme = useThemeStore((state) => state.resolvedTheme);
+  const codexQuota = useQuotaStore((state) => state.codexQuota);
   const pageTransitionLayer = usePageTransitionLayer();
   const isCurrentLayer = pageTransitionLayer ? pageTransitionLayer.status === 'current' : true;
   const navigate = useNavigate();
@@ -333,11 +336,13 @@ export function AuthFilesPage() {
     return filesMatchingProblemFilter.filter((item) => {
       const matchType = filter === 'all' || item.type === filter;
       const term = search.trim().toLowerCase();
+      const statusMessage = getAuthFileStatusMessage(item).toLowerCase();
       const matchSearch =
         !term ||
         item.name.toLowerCase().includes(term) ||
         (item.type || '').toString().toLowerCase().includes(term) ||
-        (item.provider || '').toString().toLowerCase().includes(term);
+        (item.provider || '').toString().toLowerCase().includes(term) ||
+        statusMessage.includes(term);
       return matchType && matchSearch;
     });
   }, [filesMatchingProblemFilter, filter, search]);
@@ -363,6 +368,63 @@ export function AuthFilesPage() {
     }
     return copy;
   }, [filtered, sortMode]);
+
+  const selectableSearchResults = useMemo(
+    () => sorted.filter((file) => !isRuntimeOnlyAuthFile(file)),
+    [sorted]
+  );
+
+  const codexFree401Targets = useMemo(() => {
+    const targets: string[] = [];
+    const statusPattern = /(^|\D)401(\D|$)/;
+
+    files.forEach((file) => {
+      if (isRuntimeOnlyAuthFile(file)) return;
+      const providerKey = normalizeProviderKey(String(file.provider ?? file.type ?? ''));
+      if (providerKey !== 'codex') return;
+      const planType =
+        resolveCodexPlanType(file) ??
+        (typeof codexQuota[file.name]?.planType === 'string'
+          ? codexQuota[file.name]?.planType
+          : null);
+      if (!planType || planType.trim().toLowerCase() !== 'free') return;
+      const statusMessage = getAuthFileStatusMessage(file);
+      const hasStatus401 = statusPattern.test(statusMessage);
+      const hasQuota401 = codexQuota[file.name]?.errorStatus === 401;
+      if (hasStatus401 || hasQuota401) {
+        targets.push(file.name);
+      }
+    });
+
+    return targets;
+  }, [codexQuota, files]);
+
+  const codexFreeWeeklyZeroTargets = useMemo(() => {
+    const targets: string[] = [];
+
+    files.forEach((file) => {
+      if (isRuntimeOnlyAuthFile(file)) return;
+      const providerKey = normalizeProviderKey(String(file.provider ?? file.type ?? ''));
+      if (providerKey !== 'codex') return;
+      const planType =
+        resolveCodexPlanType(file) ??
+        (typeof codexQuota[file.name]?.planType === 'string'
+          ? codexQuota[file.name]?.planType
+          : null);
+      if (!planType || planType.trim().toLowerCase() !== 'free') return;
+      const quota = codexQuota[file.name];
+      if (!quota || quota.status !== 'success') return;
+      const weeklyWindow = (quota.windows ?? []).find((window) => window.id === 'weekly');
+      if (!weeklyWindow || typeof weeklyWindow.usedPercent !== 'number') return;
+      const clampedUsed = Math.max(0, Math.min(100, weeklyWindow.usedPercent));
+      const remaining = Math.max(0, Math.min(100, 100 - clampedUsed));
+      if (remaining <= 0) {
+        targets.push(file.name);
+      }
+    });
+
+    return targets;
+  }, [codexQuota, files]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -391,6 +453,30 @@ export function AuthFilesPage() {
     },
     [showNotification, t]
   );
+
+  const handleSelectSearchResults = useCallback(() => {
+    if (selectableSearchResults.length === 0) {
+      showNotification(t('auth_files.search_select_empty'), 'info');
+      return;
+    }
+    selectAllVisible(selectableSearchResults);
+  }, [selectAllVisible, selectableSearchResults, showNotification, t]);
+
+  const handleQuickDeleteCodex401 = useCallback(() => {
+    if (codexFree401Targets.length === 0) {
+      showNotification(t('auth_files.quick_delete_codex_401_empty'), 'info');
+      return;
+    }
+    batchDelete(codexFree401Targets);
+  }, [batchDelete, codexFree401Targets, showNotification, t]);
+
+  const handleQuickDeleteCodexWeeklyZero = useCallback(() => {
+    if (codexFreeWeeklyZeroTargets.length === 0) {
+      showNotification(t('auth_files.quick_delete_codex_weekly_zero_empty'), 'info');
+      return;
+    }
+    batchDelete(codexFreeWeeklyZeroTargets);
+  }, [batchDelete, codexFreeWeeklyZeroTargets, showNotification, t]);
 
   const openExcludedEditor = useCallback(
     (provider?: string) => {
@@ -673,6 +759,39 @@ export function AuthFilesPage() {
                     </span>
                   }
                 />
+              </div>
+            </div>
+            <div className={`${styles.filterItem} ${styles.filterActionsItem}`}>
+              <label>{t('auth_files.quick_actions_label')}</label>
+              <div className={styles.filterActionButtons}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleSelectSearchResults}
+                  disabled={selectableSearchResults.length === 0}
+                >
+                  {t('auth_files.select_search_results', {
+                    count: selectableSearchResults.length,
+                  })}
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={handleQuickDeleteCodex401}
+                  disabled={disableControls || codexFree401Targets.length === 0}
+                >
+                  {t('auth_files.quick_delete_codex_401', { count: codexFree401Targets.length })}
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={handleQuickDeleteCodexWeeklyZero}
+                  disabled={disableControls || codexFreeWeeklyZeroTargets.length === 0}
+                >
+                  {t('auth_files.quick_delete_codex_weekly_zero', {
+                    count: codexFreeWeeklyZeroTargets.length,
+                  })}
+                </Button>
               </div>
             </div>
           </div>
