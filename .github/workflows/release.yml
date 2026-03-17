@@ -55,6 +55,7 @@ jobs:
           files: dist/management.html
           body_path: release-notes.md
           draft: false
-          prerelease: true # 标记为预发布版本
+          prerelease: false
+          make_latest: true  # 强制标记为 Latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
