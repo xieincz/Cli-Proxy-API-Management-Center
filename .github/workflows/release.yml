@@ -1,9 +1,10 @@
-name: Build and Release
+name: Build and Release Dev
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - dev
+  workflow_dispatch: # 新增：允许在 GitHub Actions 页面手动点击触发
 
 jobs:
   build-and-release:
@@ -16,13 +17,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: dev # 新增：强制拉取 dev 分支的代码（防止手动触发时选错分支）
           fetch-depth: 0
-          fetch-tags: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '18'
           cache: 'npm'
 
       - name: Install dependencies
@@ -31,7 +32,7 @@ jobs:
       - name: Build all-in-one HTML
         run: npm run build
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: dev-${{ github.sha }}
 
       - name: Prepare release assets
         run: |
@@ -41,24 +42,19 @@ jobs:
 
       - name: Generate release notes
         run: |
-          set -euo pipefail
-          current_tag="${GITHUB_REF_NAME}"
-          previous_tag="$(git tag --list 'v*' --sort=-v:refname | grep -v "^${current_tag}$" | head -n 1 || true)"
-          if [ -n "${previous_tag}" ]; then
-            range="${previous_tag}..${current_tag}"
-          else
-            range="${current_tag}"
-          fi
-
           : > release-notes.md
-          git log --pretty=format:"- %h %s" "${range}" >> release-notes.md
+          echo "Automated development build." >> release-notes.md
+          echo "" >> release-notes.md
+          git log -1 --pretty=format:"- %h %s" >> release-notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: dev-${{ github.sha }}
+          name: Dev Build (${{ github.sha }})
           files: dist/management.html
           body_path: release-notes.md
           draft: false
-          prerelease: false
+          prerelease: true # 标记为预发布版本
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
