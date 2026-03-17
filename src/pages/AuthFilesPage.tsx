@@ -399,19 +399,14 @@ export function AuthFilesPage() {
     return targets;
   }, [codexQuota, files]);
 
-  const codexFreeWeeklyZeroTargets = useMemo(() => {
+  const codexWeeklyZeroTargets = useMemo(() => {
     const targets: string[] = [];
 
     files.forEach((file) => {
       if (isRuntimeOnlyAuthFile(file)) return;
+      if (file.disabled) return;
       const providerKey = normalizeProviderKey(String(file.provider ?? file.type ?? ''));
       if (providerKey !== 'codex') return;
-      const planType =
-        resolveCodexPlanType(file) ??
-        (typeof codexQuota[file.name]?.planType === 'string'
-          ? codexQuota[file.name]?.planType
-          : null);
-      if (!planType || planType.trim().toLowerCase() !== 'free') return;
       const quota = codexQuota[file.name];
       if (!quota || quota.status !== 'success') return;
       const weeklyWindow = (quota.windows ?? []).find((window) => window.id === 'weekly');
@@ -419,6 +414,28 @@ export function AuthFilesPage() {
       const clampedUsed = Math.max(0, Math.min(100, weeklyWindow.usedPercent));
       const remaining = Math.max(0, Math.min(100, 100 - clampedUsed));
       if (remaining <= 0) {
+        targets.push(file.name);
+      }
+    });
+
+    return targets;
+  }, [codexQuota, files]);
+
+  const codexDisabledWeeklyPositiveTargets = useMemo(() => {
+    const targets: string[] = [];
+
+    files.forEach((file) => {
+      if (isRuntimeOnlyAuthFile(file)) return;
+      if (!file.disabled) return;
+      const providerKey = normalizeProviderKey(String(file.provider ?? file.type ?? ''));
+      if (providerKey !== 'codex') return;
+      const quota = codexQuota[file.name];
+      if (!quota || quota.status !== 'success') return;
+      const weeklyWindow = (quota.windows ?? []).find((window) => window.id === 'weekly');
+      if (!weeklyWindow || typeof weeklyWindow.usedPercent !== 'number') return;
+      const clampedUsed = Math.max(0, Math.min(100, weeklyWindow.usedPercent));
+      const remaining = Math.max(0, Math.min(100, 100 - clampedUsed));
+      if (remaining > 0) {
         targets.push(file.name);
       }
     });
@@ -470,13 +487,21 @@ export function AuthFilesPage() {
     batchDelete(codexFree401Targets);
   }, [batchDelete, codexFree401Targets, showNotification, t]);
 
-  const handleQuickDeleteCodexWeeklyZero = useCallback(() => {
-    if (codexFreeWeeklyZeroTargets.length === 0) {
-      showNotification(t('auth_files.quick_delete_codex_weekly_zero_empty'), 'info');
+  const handleQuickDisableCodexWeeklyZero = useCallback(() => {
+    if (codexWeeklyZeroTargets.length === 0) {
+      showNotification(t('auth_files.quick_disable_codex_weekly_zero_empty'), 'info');
       return;
     }
-    batchDelete(codexFreeWeeklyZeroTargets);
-  }, [batchDelete, codexFreeWeeklyZeroTargets, showNotification, t]);
+    void batchSetStatus(codexWeeklyZeroTargets, false);
+  }, [batchSetStatus, codexWeeklyZeroTargets, showNotification, t]);
+
+  const handleQuickEnableCodexWeeklyPositive = useCallback(() => {
+    if (codexDisabledWeeklyPositiveTargets.length === 0) {
+      showNotification(t('auth_files.quick_enable_codex_weekly_positive_empty'), 'info');
+      return;
+    }
+    void batchSetStatus(codexDisabledWeeklyPositiveTargets, true);
+  }, [batchSetStatus, codexDisabledWeeklyPositiveTargets, showNotification, t]);
 
   const openExcludedEditor = useCallback(
     (provider?: string) => {
@@ -783,13 +808,23 @@ export function AuthFilesPage() {
                   {t('auth_files.quick_delete_codex_401', { count: codexFree401Targets.length })}
                 </Button>
                 <Button
-                  variant="danger"
+                  variant="secondary"
                   size="sm"
-                  onClick={handleQuickDeleteCodexWeeklyZero}
-                  disabled={disableControls || codexFreeWeeklyZeroTargets.length === 0}
+                  onClick={handleQuickDisableCodexWeeklyZero}
+                  disabled={disableControls || codexWeeklyZeroTargets.length === 0}
                 >
-                  {t('auth_files.quick_delete_codex_weekly_zero', {
-                    count: codexFreeWeeklyZeroTargets.length,
+                  {t('auth_files.quick_disable_codex_weekly_zero', {
+                    count: codexWeeklyZeroTargets.length,
+                  })}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleQuickEnableCodexWeeklyPositive}
+                  disabled={disableControls || codexDisabledWeeklyPositiveTargets.length === 0}
+                >
+                  {t('auth_files.quick_enable_codex_weekly_positive', {
+                    count: codexDisabledWeeklyPositiveTargets.length,
                   })}
                 </Button>
               </div>
