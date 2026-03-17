@@ -97,7 +97,6 @@ export function OAuthPage() {
   const { showNotification } = useNotificationStore();
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const serverVersion = useAuthStore((state) => state.serverVersion);
-  const isPlus = serverVersion?.includes('-plus') ?? false;
   
   useEffect(() => {
     if (!serverVersion) {
@@ -354,7 +353,6 @@ export function OAuthPage() {
 
       <div className={styles.content}>
         {PROVIDERS.map((provider) => {
-          if (provider.id === 'github' && !isPlus) return null;
           const state = states[provider.id] || {};
           const canSubmitCallback = CALLBACK_SUPPORTED.includes(provider.id) && Boolean(state.url);
           return (

@@ -23,7 +23,6 @@ export function QuotaPage() {
   const { t } = useTranslation();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const serverVersion = useAuthStore((state) => state.serverVersion);
-  const isPlus = serverVersion?.includes('-plus') ?? false;
 
   useEffect(() => {
     if (!serverVersion) {
@@ -110,14 +109,12 @@ export function QuotaPage() {
         loading={loading}
         disabled={disableControls}
       />
-      {isPlus && (
-        <QuotaSection
-          config={GITHUB_COPILOT_CONFIG}
-          files={files}
-          loading={loading}
-          disabled={disableControls}
-        />
-      )}
+      <QuotaSection
+        config={GITHUB_COPILOT_CONFIG}
+        files={files}
+        loading={loading}
+        disabled={disableControls}
+      />
     </div>
   );
 }
