@@ -488,6 +488,7 @@
     "delete_problem_none": "当前没有可删除的有问题认证文件",
     "delete_problem_filtered_none": "当前筛选类型 ({{type}}) 下没有可删除的有问题认证文件",
     "files_count": "个文件",
+    "count_with_enabled": "{{total}}（启用 {{enabled}}）",
     "pagination_prev": "上一页",
     "pagination_next": "下一页",
       "pagination_info": "第 {{current}} / {{total}} 页 · 共 {{count}} 个文件",

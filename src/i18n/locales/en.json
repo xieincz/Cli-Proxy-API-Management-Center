@@ -488,6 +488,7 @@
     "delete_problem_none": "No deletable problematic auth files under the current filter",
     "delete_problem_filtered_none": "No deletable problematic {{type}} auth files under the current filter",
     "files_count": "files",
+    "count_with_enabled": "{{total}} (enabled {{enabled}})",
     "pagination_prev": "Previous",
     "pagination_next": "Next",
       "pagination_info": "Page {{current}} / {{total}} · {{count}} files",

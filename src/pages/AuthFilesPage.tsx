@@ -332,6 +332,22 @@ export function AuthFilesPage() {
     return counts;
   }, [filesMatchingProblemFilter]);
 
+  const enabledTypeCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 };
+    filesMatchingProblemFilter.forEach((file) => {
+      if (file.disabled) return;
+      counts.all += 1;
+      if (!file.type) return;
+      counts[file.type] = (counts[file.type] || 0) + 1;
+    });
+    return counts;
+  }, [filesMatchingProblemFilter]);
+
+  const enabledFilesCount = useMemo(
+    () => files.reduce((count, file) => count + (file.disabled ? 0 : 1), 0),
+    [files]
+  );
+
   const filtered = useMemo(() => {
     return filesMatchingProblemFilter.filter((item) => {
       const matchType = filter === 'all' || item.type === filter;
@@ -628,6 +644,8 @@ export function AuthFilesPage() {
       {existingTypes.map((type) => {
         const isActive = filter === type;
         const iconSrc = getFilterTagIcon(type, resolvedTheme);
+        const totalCount = typeCounts[type] ?? 0;
+        const enabledCount = enabledTypeCounts[type] ?? 0;
         const color =
           type === 'all'
             ? { bg: 'var(--bg-tertiary)', text: 'var(--text-primary)' }
@@ -651,7 +669,9 @@ export function AuthFilesPage() {
               {iconSrc && <img src={iconSrc} alt="" className={styles.filterTagIcon} />}
               <span>{getTypeLabel(t, type)}</span>
             </span>
-            <span className={styles.filterTagCount}>{typeCounts[type] ?? 0}</span>
+            <span className={styles.filterTagCount}>
+              {t('auth_files.count_with_enabled', { total: totalCount, enabled: enabledCount })}
+            </span>
           </button>
         );
       })}
@@ -661,7 +681,11 @@ export function AuthFilesPage() {
   const titleNode = (
     <div className={styles.titleWrapper}>
       <span>{t('auth_files.title_section')}</span>
-      {files.length > 0 && <span className={styles.countBadge}>{files.length}</span>}
+      {files.length > 0 && (
+        <span className={styles.countBadge}>
+          {t('auth_files.count_with_enabled', { total: files.length, enabled: enabledFilesCount })}
+        </span>
+      )}
     </div>
   );
 

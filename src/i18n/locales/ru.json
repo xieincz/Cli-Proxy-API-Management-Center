@@ -488,6 +488,7 @@
     "delete_problem_none": "Нет проблемных файлов авторизации для удаления при текущем фильтре",
     "delete_problem_filtered_none": "Нет проблемных файлов авторизации {{type}} для удаления при текущем фильтре",
     "files_count": "файлов",
+    "count_with_enabled": "{{total}} (включено {{enabled}})",
     "pagination_prev": "Предыдущая",
     "pagination_next": "Следующая",
       "pagination_info": "Страница {{current}} / {{total}} · {{count}} файлов",
