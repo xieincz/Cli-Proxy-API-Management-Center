@@ -128,6 +128,19 @@ export const parsePriorityValue = (value: unknown): number | undefined => {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 };
 
+export const getAuthFileModifiedTimestamp = (item: AuthFileItem): number | null => {
+  const raw = item['modtime'] ?? item.modified;
+  if (raw == null || raw === '') return null;
+
+  const asNumber = Number(raw);
+  if (Number.isFinite(asNumber) && !Number.isNaN(asNumber)) {
+    return asNumber < 1e12 ? asNumber * 1000 : asNumber;
+  }
+
+  const timestamp = new Date(String(raw)).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+};
+
 export const normalizeExcludedModels = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
 
@@ -208,14 +221,9 @@ export function resolveAuthFileStats(file: AuthFileItem, stats: KeyStats): KeySt
 }
 
 export const formatModified = (item: AuthFileItem): string => {
-  const raw = item['modtime'] ?? item.modified;
-  if (!raw) return '-';
-  const asNumber = Number(raw);
-  const date =
-    Number.isFinite(asNumber) && !Number.isNaN(asNumber)
-      ? new Date(asNumber < 1e12 ? asNumber * 1000 : asNumber)
-      : new Date(String(raw));
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
+  const timestamp = getAuthFileModifiedTimestamp(item);
+  if (timestamp == null) return '-';
+  return new Date(timestamp).toLocaleString();
 };
 
 // 检查模型是否被 OAuth 排除
