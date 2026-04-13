@@ -110,12 +110,16 @@ export interface QuotaStore {
   clearQuotaCache: () => void;
 }
 
+export interface QuotaFetchOptions {
+  timeoutMs?: number;
+}
+
 export interface QuotaConfig<TState, TData> {
   type: QuotaType;
   i18nPrefix: string;
   cardIdleMessageKey?: string;
   filterFn: (file: AuthFileItem) => boolean;
-  fetchQuota: (file: AuthFileItem, t: TFunction) => Promise<TData>;
+  fetchQuota: (file: AuthFileItem, t: TFunction, options?: QuotaFetchOptions) => Promise<TData>;
   storeSelector: (state: QuotaStore) => Record<string, TState>;
   storeSetter: keyof QuotaStore;
   buildLoadingState: () => TState;
@@ -404,7 +408,8 @@ const buildCodexQuotaWindows = (payload: CodexUsagePayload, t: TFunction): Codex
 
 const fetchCodexQuota = async (
   file: AuthFileItem,
-  t: TFunction
+  t: TFunction,
+  options?: QuotaFetchOptions
 ): Promise<{ planType: string | null; windows: CodexQuotaWindow[] }> => {
   const rawAuthIndex = file['auth_index'] ?? file.authIndex;
   const authIndex = normalizeAuthIndex(rawAuthIndex);
@@ -428,7 +433,7 @@ const fetchCodexQuota = async (
     method: 'GET',
     url: CODEX_USAGE_URL,
     header: requestHeader,
-  });
+  }, options?.timeoutMs ? { timeout: options.timeoutMs } : undefined);
 
   if (result.statusCode < 200 || result.statusCode >= 300) {
     throw createStatusError(getApiCallErrorMessage(result), result.statusCode);

@@ -1330,6 +1330,8 @@
     "refresh_files": "Обновить файлы авторизации",
     "refresh_files_and_quota": "Обновить файлы и квоты",
     "refresh_codex_all": "Обновить все квоты Codex",
+    "codex_refresh_timeout": "Тайм-аут (с)",
+    "codex_refresh_progress": "{{current}}/{{total}}",
     "card_idle_hint": "Используйте кнопку «Обновить файлы и квоты» сверху, чтобы загрузить актуальные данные по квотам."
   },
   "system_info": {

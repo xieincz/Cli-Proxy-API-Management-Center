@@ -7,9 +7,10 @@ import { useTranslation } from 'react-i18next';
 import type { AuthFileItem } from '@/types';
 import { useQuotaStore } from '@/stores';
 import { getStatusFromError } from '@/utils/quota';
-import type { QuotaConfig } from './quotaConfigs';
+import type { QuotaConfig, QuotaFetchOptions } from './quotaConfigs';
 
 type QuotaScope = 'page' | 'all';
+const DEFAULT_ALL_SCOPE_CONCURRENCY = 10;
 
 type QuotaUpdater<T> = T | ((prev: T) => T);
 
@@ -23,6 +24,14 @@ interface LoadQuotaResult<TData> {
   errorStatus?: number;
 }
 
+interface LoadQuotaOptions {
+  scope: QuotaScope;
+  setLoading: (loading: boolean, scope?: QuotaScope | null) => void;
+  fetchOptions?: QuotaFetchOptions;
+  concurrency?: number;
+  onProgress?: (progress: { completed: number; total: number }) => void;
+}
+
 export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>) {
   const { t } = useTranslation();
   const quota = useQuotaStore(config.storeSelector);
@@ -34,11 +43,8 @@ export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>
   const requestIdRef = useRef(0);
 
   const loadQuota = useCallback(
-    async (
-      targets: AuthFileItem[],
-      scope: QuotaScope,
-      setLoading: (loading: boolean, scope?: QuotaScope | null) => void
-    ) => {
+    async (targets: AuthFileItem[], options: LoadQuotaOptions) => {
+      const { scope, setLoading, fetchOptions, concurrency, onProgress } = options;
       if (loadingRef.current) return;
       loadingRef.current = true;
       const requestId = ++requestIdRef.current;
@@ -55,24 +61,23 @@ export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>
           return nextState;
         });
 
-        const results = await Promise.all(
-          targets.map(async (file): Promise<LoadQuotaResult<TData>> => {
-            try {
-              const data = await config.fetchQuota(file, t);
-              return { name: file.name, status: 'success', data };
-            } catch (err: unknown) {
-              const message = err instanceof Error ? err.message : t('common.unknown_error');
-              const errorStatus = getStatusFromError(err);
-              return { name: file.name, status: 'error', error: message, errorStatus };
-            }
-          })
+        const total = targets.length;
+        let completed = 0;
+        let nextIndex = 0;
+
+        const workerCount = Math.max(
+          1,
+          Math.min(
+            total,
+            concurrency ?? (scope === 'all' ? DEFAULT_ALL_SCOPE_CONCURRENCY : total)
+          )
         );
 
-        if (requestId !== requestIdRef.current) return;
+        const applyResult = (result: LoadQuotaResult<TData>) => {
+          if (requestId !== requestIdRef.current) return;
 
-        setQuota((prev) => {
-          const nextState = { ...prev };
-          results.forEach((result) => {
+          setQuota((prev) => {
+            const nextState = { ...prev };
             if (result.status === 'success') {
               nextState[result.name] = config.buildSuccessState(result.data as TData);
             } else {
@@ -81,9 +86,37 @@ export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>
                 result.errorStatus
               );
             }
+            return nextState;
           });
-          return nextState;
-        });
+
+          completed += 1;
+          onProgress?.({ completed, total });
+        };
+
+        const loadSingleQuota = async (file: AuthFileItem): Promise<LoadQuotaResult<TData>> => {
+          try {
+            const data = await config.fetchQuota(file, t, fetchOptions);
+            return { name: file.name, status: 'success', data };
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : t('common.unknown_error');
+            const errorStatus = getStatusFromError(err);
+            return { name: file.name, status: 'error', error: message, errorStatus };
+          }
+        };
+
+        await Promise.all(
+          Array.from({ length: workerCount }, async () => {
+            while (true) {
+              const currentIndex = nextIndex;
+              nextIndex += 1;
+              if (currentIndex >= total) return;
+
+              const file = targets[currentIndex];
+              const result = await loadSingleQuota(file);
+              applyResult(result);
+            }
+          })
+        );
       } finally {
         if (requestId === requestIdRef.current) {
           setLoading(false);

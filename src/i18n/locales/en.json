@@ -1351,6 +1351,8 @@
     "refresh_files": "Refresh auth files",
     "refresh_files_and_quota": "Refresh files & quota",
     "refresh_codex_all": "Refresh all Codex quotas",
+    "codex_refresh_timeout": "Timeout (s)",
+    "codex_refresh_progress": "{{current}}/{{total}}",
     "card_idle_hint": "Use the top \"Refresh files & quota\" button to fetch the latest quota data."
   },
   "system_info": {

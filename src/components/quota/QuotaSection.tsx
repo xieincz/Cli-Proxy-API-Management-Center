@@ -2,11 +2,13 @@
  * Generic quota section component.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Input } from '@/components/ui/Input';
+import { useLocalStorage } from '@/hooks';
 import { triggerHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useQuotaStore, useThemeStore } from '@/stores';
 import type { AuthFileItem, ResolvedTheme } from '@/types';
@@ -26,6 +28,26 @@ type ViewMode = 'paged' | 'all';
 
 const MAX_ITEMS_PER_PAGE = 25;
 const MAX_SHOW_ALL_THRESHOLD = 30;
+const DEFAULT_CODEX_REFRESH_TIMEOUT_SECONDS = 30;
+const MIN_CODEX_REFRESH_TIMEOUT_SECONDS = 5;
+const MAX_CODEX_REFRESH_TIMEOUT_SECONDS = 600;
+const CODEX_BATCH_REFRESH_CONCURRENCY = 10;
+
+interface BatchRefreshProgress {
+  completed: number;
+  total: number;
+}
+
+const clampCodexRefreshTimeoutSeconds = (value: number): number =>
+  Math.min(MAX_CODEX_REFRESH_TIMEOUT_SECONDS, Math.max(MIN_CODEX_REFRESH_TIMEOUT_SECONDS, Math.round(value)));
+
+const normalizeCodexRefreshTimeoutSeconds = (value: unknown): number => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_CODEX_REFRESH_TIMEOUT_SECONDS;
+  }
+  return clampCodexRefreshTimeoutSeconds(parsed);
+};
 
 interface QuotaPaginationState<T> {
   pageSize: number;
@@ -108,11 +130,24 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
   const setQuota = useQuotaStore((state) => state[config.storeSetter]) as QuotaSetter<
     Record<string, TState>
   >;
+  const isCodexSection = config.type === 'codex';
 
-  /* Removed useRef */
   const [columns, gridRef] = useGridColumns(380); // Min card width 380px matches SCSS
   const [viewMode, setViewMode] = useState<ViewMode>('paged');
   const [showTooManyWarning, setShowTooManyWarning] = useState(false);
+  const [codexRefreshTimeoutSeconds, setCodexRefreshTimeoutSeconds] = useLocalStorage<number>(
+    'quota.codexRefreshTimeoutSeconds',
+    DEFAULT_CODEX_REFRESH_TIMEOUT_SECONDS
+  );
+  const normalizedCodexRefreshTimeoutSeconds = normalizeCodexRefreshTimeoutSeconds(
+    codexRefreshTimeoutSeconds
+  );
+  const [codexRefreshTimeoutInput, setCodexRefreshTimeoutInput] = useState(() =>
+    String(normalizedCodexRefreshTimeoutSeconds)
+  );
+  const [codexRefreshProgress, setCodexRefreshProgress] = useState<BatchRefreshProgress | null>(
+    null
+  );
 
   const filteredFiles = useMemo(() => files.filter((file) => config.filterFn(file)), [
     files,
@@ -164,16 +199,83 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
 
   const pendingQuotaRefreshRef = useRef(false);
   const prevFilesLoadingRef = useRef(loading);
+  const isRefreshing = sectionLoading || loading;
+  const isRefreshingAll = sectionLoading && loadingScope === 'all';
+
+  useEffect(() => {
+    if (codexRefreshTimeoutSeconds !== normalizedCodexRefreshTimeoutSeconds) {
+      setCodexRefreshTimeoutSeconds(normalizedCodexRefreshTimeoutSeconds);
+      return;
+    }
+
+    setCodexRefreshTimeoutInput(String(normalizedCodexRefreshTimeoutSeconds));
+  }, [
+    codexRefreshTimeoutSeconds,
+    normalizedCodexRefreshTimeoutSeconds,
+    setCodexRefreshTimeoutSeconds
+  ]);
 
   const handleRefresh = useCallback(() => {
     pendingQuotaRefreshRef.current = true;
     void triggerHeaderRefresh();
   }, []);
 
+  const commitCodexRefreshTimeoutInput = useCallback(
+    (rawValue: string) => {
+      const trimmed = rawValue.trim();
+      if (!trimmed) {
+        setCodexRefreshTimeoutInput(String(normalizedCodexRefreshTimeoutSeconds));
+        return;
+      }
+
+      const parsed = Number(trimmed);
+      if (!Number.isFinite(parsed)) {
+        setCodexRefreshTimeoutInput(String(normalizedCodexRefreshTimeoutSeconds));
+        return;
+      }
+
+      const nextValue = clampCodexRefreshTimeoutSeconds(parsed);
+      setCodexRefreshTimeoutSeconds(nextValue);
+      setCodexRefreshTimeoutInput(String(nextValue));
+    },
+    [normalizedCodexRefreshTimeoutSeconds, setCodexRefreshTimeoutSeconds]
+  );
+
   const handleRefreshAll = useCallback(() => {
-    if (filteredFiles.length === 0) return;
-    void loadQuota(filteredFiles, 'all', setLoading);
-  }, [filteredFiles, loadQuota, setLoading]);
+    if (!isCodexSection || filteredFiles.length === 0 || isRefreshing) return;
+
+    startTransition(() => {
+      setCodexRefreshProgress({
+        completed: 0,
+        total: filteredFiles.length
+      });
+    });
+
+    void loadQuota(filteredFiles, {
+      scope: 'all',
+      setLoading,
+      concurrency: CODEX_BATCH_REFRESH_CONCURRENCY,
+      fetchOptions: {
+        timeoutMs: normalizedCodexRefreshTimeoutSeconds * 1000
+      },
+      onProgress: ({ completed, total }) => {
+        startTransition(() => {
+          setCodexRefreshProgress({ completed, total });
+        });
+      }
+    }).finally(() => {
+      startTransition(() => {
+        setCodexRefreshProgress(null);
+      });
+    });
+  }, [
+    filteredFiles,
+    isCodexSection,
+    isRefreshing,
+    loadQuota,
+    normalizedCodexRefreshTimeoutSeconds,
+    setLoading
+  ]);
 
   useEffect(() => {
     const wasLoading = prevFilesLoadingRef.current;
@@ -187,7 +289,7 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     const scope = effectiveViewMode === 'all' ? 'all' : 'page';
     const targets = effectiveViewMode === 'all' ? filteredFiles : pageItems;
     if (targets.length === 0) return;
-    loadQuota(targets, scope, setLoading);
+    void loadQuota(targets, { scope, setLoading });
   }, [loading, effectiveViewMode, filteredFiles, pageItems, loadQuota, setLoading]);
 
   useEffect(() => {
@@ -219,9 +321,12 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     </div>
   );
 
-  const isRefreshing = sectionLoading || loading;
-  const isRefreshingAll = sectionLoading && loadingScope === 'all';
-  const isCodexSection = config.type === 'codex';
+  const codexRefreshProgressLabel = codexRefreshProgress
+    ? t('quota_management.codex_refresh_progress', {
+        current: codexRefreshProgress.completed,
+        total: codexRefreshProgress.total
+      })
+    : null;
 
   return (
     <Card
@@ -251,17 +356,53 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
             </Button>
           </div>
           {isCodexSection && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleRefreshAll}
-              disabled={disabled || isRefreshing}
-              loading={isRefreshingAll}
-              title={t('quota_management.refresh_codex_all')}
-              aria-label={t('quota_management.refresh_codex_all')}
-            >
-              {t('quota_management.refresh_codex_all')}
-            </Button>
+            <div className={styles.codexBatchControls}>
+              <div className={styles.headerControl}>
+                <label htmlFor="codex-refresh-timeout">
+                  {t('quota_management.codex_refresh_timeout')}
+                </label>
+                <Input
+                  id="codex-refresh-timeout"
+                  type="number"
+                  min={MIN_CODEX_REFRESH_TIMEOUT_SECONDS}
+                  max={MAX_CODEX_REFRESH_TIMEOUT_SECONDS}
+                  step={5}
+                  inputMode="numeric"
+                  className={styles.timeoutInput}
+                  value={codexRefreshTimeoutInput}
+                  onChange={(event) => setCodexRefreshTimeoutInput(event.currentTarget.value)}
+                  onBlur={(event) => commitCodexRefreshTimeoutInput(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      commitCodexRefreshTimeoutInput(event.currentTarget.value);
+                    }
+                  }}
+                  aria-label={t('quota_management.codex_refresh_timeout')}
+                  title={t('quota_management.codex_refresh_timeout')}
+                  disabled={disabled || isRefreshing}
+                />
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleRefreshAll}
+                disabled={disabled || isRefreshing || filteredFiles.length === 0}
+                loading={isRefreshingAll}
+                title={t('quota_management.refresh_codex_all')}
+                aria-label={
+                  codexRefreshProgressLabel
+                    ? `${t('quota_management.refresh_codex_all')} ${codexRefreshProgressLabel}`
+                    : t('quota_management.refresh_codex_all')
+                }
+              >
+                {t('quota_management.refresh_codex_all')}
+              </Button>
+              {isRefreshingAll && codexRefreshProgressLabel && (
+                <span className={styles.refreshProgressBadge} aria-live="polite">
+                  {codexRefreshProgressLabel}
+                </span>
+              )}
+            </div>
           )}
           <Button
             variant="secondary"
