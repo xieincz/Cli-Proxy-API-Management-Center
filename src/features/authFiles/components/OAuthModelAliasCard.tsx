@@ -135,10 +135,20 @@ export function OAuthModelAliasCard(props: OAuthModelAliasCardProps) {
                 </div>
               </div>
               <div className={styles.excludedActions}>
-                <Button variant="secondary" size="sm" onClick={() => onEditProvider(provider)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onEditProvider(provider)}
+                  disabled={disableControls}
+                >
                   {t('common.edit')}
                 </Button>
-                <Button variant="danger" size="sm" onClick={() => onDeleteProvider(provider)}>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => onDeleteProvider(provider)}
+                  disabled={disableControls}
+                >
                   {t('oauth_model_alias.delete')}
                 </Button>
               </div>

@@ -129,6 +129,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
                   selected ? t('auth_files.batch_deselect') : t('auth_files.batch_select_all')
                 }
                 title={selected ? t('auth_files.batch_deselect') : t('auth_files.batch_select_all')}
+                disabled={disableControls}
               />
             )}
             <span

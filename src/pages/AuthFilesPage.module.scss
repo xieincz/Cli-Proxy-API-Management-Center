@@ -65,6 +65,32 @@
   margin-bottom: $spacing-md;
 }
 
+.batchProgressPanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+  padding: 10px 12px;
+  margin-bottom: $spacing-md;
+  border-radius: $radius-md;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-secondary);
+}
+
+.batchProgressLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.batchProgressValue {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 // 筛选区域
 .filterSection {
   display: flex;

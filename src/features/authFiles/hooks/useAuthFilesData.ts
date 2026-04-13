@@ -12,6 +12,11 @@ import {
   hasAuthFileStatusMessage,
   isRuntimeOnlyAuthFile,
 } from '@/features/authFiles/constants';
+import {
+  IDLE_BATCH_PROGRESS_STATE,
+  runBatchTasks,
+  type BatchProgressState,
+} from '@/features/authFiles/batch';
 
 type DeleteAllOptions = {
   filter: string;
@@ -29,6 +34,7 @@ export type UseAuthFilesDataResult = {
   uploading: boolean;
   deleting: string | null;
   deletingAll: boolean;
+  batchProgress: BatchProgressState;
   statusUpdating: Record<string, boolean>;
   fileInputRef: RefObject<HTMLInputElement | null>;
   loadFiles: () => Promise<void>;
@@ -60,6 +66,7 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<BatchProgressState>(IDLE_BATCH_PROGRESS_STATE);
   const [statusUpdating, setStatusUpdating] = useState<Record<string, boolean>>({});
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 
@@ -161,36 +168,60 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
       }
 
       setUploading(true);
-      let successCount = 0;
-      const failed: { name: string; message: string }[] = [];
+      setBatchProgress({
+        active: true,
+        label: t('auth_files.batch_upload_progress'),
+        completed: 0,
+        total: validFiles.length,
+      });
 
-      for (const file of validFiles) {
-        try {
-          await authFilesApi.upload(file);
-          successCount++;
-        } catch (err: unknown) {
-          const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-          failed.push({ name: file.name, message: errorMessage });
+      try {
+        const results = await runBatchTasks({
+          items: validFiles,
+          worker: (file) => authFilesApi.upload(file),
+          onProgress: ({ completed, total }) => {
+            setBatchProgress({
+              active: true,
+              label: t('auth_files.batch_upload_progress'),
+              completed,
+              total,
+            });
+          },
+        });
+
+        const failed: { name: string; message: string }[] = [];
+        let successCount = 0;
+
+        results.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            successCount++;
+            return;
+          }
+
+          const errorMessage =
+            result.reason instanceof Error ? result.reason.message : 'Unknown error';
+          failed.push({ name: result.item.name, message: errorMessage });
+        });
+
+        if (successCount > 0) {
+          const suffix = validFiles.length > 1 ? ` (${successCount}/${validFiles.length})` : '';
+          showNotification(
+            `${t('auth_files.upload_success')}${suffix}`,
+            failed.length ? 'warning' : 'success'
+          );
+          await loadFiles();
+          await refreshKeyStats();
         }
-      }
 
-      if (successCount > 0) {
-        const suffix = validFiles.length > 1 ? ` (${successCount}/${validFiles.length})` : '';
-        showNotification(
-          `${t('auth_files.upload_success')}${suffix}`,
-          failed.length ? 'warning' : 'success'
-        );
-        await loadFiles();
-        await refreshKeyStats();
+        if (failed.length > 0) {
+          const details = failed.map((item) => `${item.name}: ${item.message}`).join('; ');
+          showNotification(`${t('notification.upload_failed')}: ${details}`, 'error');
+        }
+      } finally {
+        setBatchProgress(IDLE_BATCH_PROGRESS_STATE);
+        setUploading(false);
+        event.target.value = '';
       }
-
-      if (failed.length > 0) {
-        const details = failed.map((item) => `${item.name}: ${item.message}`).join('; ');
-        showNotification(`${t('notification.upload_failed')}: ${details}`, 'error');
-      }
-
-      setUploading(false);
-      event.target.value = '';
     },
     [loadFiles, refreshKeyStats, showNotification, t]
   );
@@ -275,15 +306,37 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
               let success = 0;
               let failed = 0;
               const deletedNames: string[] = [];
+              setBatchProgress({
+                active: true,
+                label: t('auth_files.batch_delete_progress'),
+                completed: 0,
+                total: filesToDelete.length,
+              });
 
-              for (const file of filesToDelete) {
-                try {
-                  await authFilesApi.deleteFile(file.name);
-                  success++;
-                  deletedNames.push(file.name);
-                } catch {
-                  failed++;
-                }
+              try {
+                const results = await runBatchTasks({
+                  items: filesToDelete,
+                  worker: (file) => authFilesApi.deleteFile(file.name),
+                  onProgress: ({ completed, total }) => {
+                    setBatchProgress({
+                      active: true,
+                      label: t('auth_files.batch_delete_progress'),
+                      completed,
+                      total,
+                    });
+                  },
+                });
+
+                results.forEach((result) => {
+                  if (result.status === 'fulfilled') {
+                    success++;
+                    deletedNames.push(result.item.name);
+                  } else {
+                    failed++;
+                  }
+                });
+              } finally {
+                setBatchProgress(IDLE_BATCH_PROGRESS_STATE);
               }
 
               setFiles((prev) => prev.filter((f) => !deletedNames.includes(f.name)));
@@ -346,6 +399,7 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
             const errorMessage = err instanceof Error ? err.message : '';
             showNotification(`${t('notification.delete_failed')}: ${errorMessage}`, 'error');
           } finally {
+            setBatchProgress(IDLE_BATCH_PROGRESS_STATE);
             setDeletingAll(false);
           }
         }
@@ -423,18 +477,37 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
           targetNames.has(file.name) ? { ...file, disabled: nextDisabled } : file
         )
       );
+      setBatchProgress({
+        active: true,
+        label: enabled
+          ? t('auth_files.batch_enable_progress')
+          : t('auth_files.batch_disable_progress'),
+        completed: 0,
+        total: uniqueNames.length,
+      });
 
-      const results = await Promise.allSettled(
-        uniqueNames.map((name) => authFilesApi.setStatus(name, nextDisabled))
-      );
+      const results = await runBatchTasks({
+        items: uniqueNames,
+        worker: (name) => authFilesApi.setStatus(name, nextDisabled),
+        onProgress: ({ completed, total }) => {
+          setBatchProgress({
+            active: true,
+            label: enabled
+              ? t('auth_files.batch_enable_progress')
+              : t('auth_files.batch_disable_progress'),
+            completed,
+            total,
+          });
+        },
+      });
 
       let successCount = 0;
       let failCount = 0;
       const failedNames = new Set<string>();
       const confirmedDisabled = new Map<string, boolean>();
 
-      results.forEach((result, index) => {
-        const name = uniqueNames[index];
+      results.forEach((result) => {
+        const name = result.item;
         if (result.status === 'fulfilled') {
           successCount++;
           confirmedDisabled.set(name, result.value.disabled);
@@ -466,6 +539,7 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
       }
 
       deselectAll();
+      setBatchProgress(IDLE_BATCH_PROGRESS_STATE);
     },
     [deselectAll, showNotification, t]
   );
@@ -481,15 +555,31 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
         variant: 'danger',
         confirmText: t('common.confirm'),
         onConfirm: async () => {
-          const results = await Promise.allSettled(
-            uniqueNames.map((name) => authFilesApi.deleteFile(name))
-          );
+          setBatchProgress({
+            active: true,
+            label: t('auth_files.batch_delete_progress'),
+            completed: 0,
+            total: uniqueNames.length,
+          });
+
+          const results = await runBatchTasks({
+            items: uniqueNames,
+            worker: (name) => authFilesApi.deleteFile(name),
+            onProgress: ({ completed, total }) => {
+              setBatchProgress({
+                active: true,
+                label: t('auth_files.batch_delete_progress'),
+                completed,
+                total,
+              });
+            },
+          });
 
           const deleted: string[] = [];
           let failCount = 0;
-          results.forEach((result, index) => {
+          results.forEach((result) => {
             if (result.status === 'fulfilled') {
-              deleted.push(uniqueNames[index]);
+              deleted.push(result.item);
             } else {
               failCount++;
             }
@@ -527,6 +617,8 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
               'warning'
             );
           }
+
+          setBatchProgress(IDLE_BATCH_PROGRESS_STATE);
         }
       });
     },
@@ -542,6 +634,7 @@ export function useAuthFilesData(options: UseAuthFilesDataOptions): UseAuthFiles
     uploading,
     deleting,
     deletingAll,
+    batchProgress,
     statusUpdating,
     fileInputRef,
     loadFiles,

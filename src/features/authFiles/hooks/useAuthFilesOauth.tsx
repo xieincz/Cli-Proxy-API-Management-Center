@@ -5,6 +5,11 @@ import { useNotificationStore } from '@/stores';
 import type { AuthFileItem, OAuthModelAliasEntry } from '@/types';
 import type { AuthFileModelItem } from '@/features/authFiles/constants';
 import { normalizeProviderKey } from '@/features/authFiles/constants';
+import {
+  IDLE_BATCH_PROGRESS_STATE,
+  runBatchTasks,
+  type BatchProgressState,
+} from '@/features/authFiles/batch';
 
 type UnsupportedError = 'unsupported' | null;
 type ViewMode = 'diagram' | 'list';
@@ -16,6 +21,7 @@ export type UseAuthFilesOauthResult = {
   modelAliasError: UnsupportedError;
   allProviderModels: Record<string, AuthFileModelItem[]>;
   providerList: string[];
+  batchProgress: BatchProgressState;
   loadExcluded: () => Promise<void>;
   loadModelAlias: () => Promise<void>;
   deleteExcluded: (provider: string) => void;
@@ -49,6 +55,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
   const [allProviderModels, setAllProviderModels] = useState<Record<string, AuthFileModelItem[]>>(
     {}
   );
+  const [batchProgress, setBatchProgress] = useState<BatchProgressState>(IDLE_BATCH_PROGRESS_STATE);
 
   const excludedUnsupportedRef = useRef(false);
   const mappingsUnsupportedRef = useRef(false);
@@ -85,27 +92,52 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
         return;
       }
 
-      const results = await Promise.all(
-        providerList.map(async (provider) => {
-          try {
-            const models = await authFilesApi.getModelDefinitions(provider);
-            return { provider, models };
-          } catch {
-            return { provider, models: [] as AuthFileModelItem[] };
-          }
-        })
-      );
-
-      if (cancelled) return;
-
-      const nextModels: Record<string, AuthFileModelItem[]> = {};
-      results.forEach(({ provider, models }) => {
-        if (models.length > 0) {
-          nextModels[provider] = models;
-        }
+      setBatchProgress({
+        active: true,
+        label: t('auth_files.batch_model_definitions_progress'),
+        completed: 0,
+        total: providerList.length,
       });
 
-      setAllProviderModels(nextModels);
+      try {
+        const results = await runBatchTasks({
+          items: providerList,
+          worker: async (provider) => {
+            try {
+              const models = await authFilesApi.getModelDefinitions(provider);
+              return { provider, models };
+            } catch {
+              return { provider, models: [] as AuthFileModelItem[] };
+            }
+          },
+          onProgress: ({ completed, total }) => {
+            if (cancelled) return;
+            setBatchProgress({
+              active: true,
+              label: t('auth_files.batch_model_definitions_progress'),
+              completed,
+              total,
+            });
+          },
+        });
+
+        if (cancelled) return;
+
+        const nextModels: Record<string, AuthFileModelItem[]> = {};
+        results.forEach((result) => {
+          if (result.status !== 'fulfilled') return;
+          const { provider, models } = result.value;
+          if (models.length > 0) {
+            nextModels[provider] = models;
+          }
+        });
+
+        setAllProviderModels(nextModels);
+      } finally {
+        if (!cancelled) {
+          setBatchProgress(IDLE_BATCH_PROGRESS_STATE);
+        }
+      }
     };
 
     void loadAllModels();
@@ -113,7 +145,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
     return () => {
       cancelled = true;
     };
-  }, [providerList, viewMode]);
+  }, [providerList, t, viewMode]);
 
   const loadExcluded = useCallback(async () => {
     try {
@@ -379,18 +411,32 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
       let failureMessage = '';
 
       try {
-        const results = await Promise.allSettled(
-          providersToUpdate.map(([provider, mappings]) => {
+        setBatchProgress({
+          active: true,
+          label: t('auth_files.batch_alias_rename_progress'),
+          completed: 0,
+          total: providersToUpdate.length,
+        });
+
+        const results = await runBatchTasks({
+          items: providersToUpdate,
+          worker: ([provider, mappings]) => {
             const nextMappings = mappings.map((m) =>
               (m.alias ?? '').trim().toLowerCase() === oldKey ? { ...m, alias: newTrim } : m
             );
             return authFilesApi.saveOauthModelAlias(provider, nextMappings);
-          })
-        );
+          },
+          onProgress: ({ completed, total }) => {
+            setBatchProgress({
+              active: true,
+              label: t('auth_files.batch_alias_rename_progress'),
+              completed,
+              total,
+            });
+          },
+        });
 
-        const failures = results.filter(
-          (result): result is PromiseRejectedResult => result.status === 'rejected'
-        );
+        const failures = results.filter((result) => result.status === 'rejected');
 
         if (failures.length > 0) {
           hadFailure = true;
@@ -398,6 +444,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
           failureMessage = reason instanceof Error ? reason.message : String(reason ?? '');
         }
       } finally {
+        setBatchProgress(IDLE_BATCH_PROGRESS_STATE);
         await loadModelAlias();
       }
 
@@ -442,8 +489,16 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
           let failureMessage = '';
 
           try {
-            const results = await Promise.allSettled(
-              providersToUpdate.map(([provider, mappings]) => {
+            setBatchProgress({
+              active: true,
+              label: t('auth_files.batch_alias_delete_progress'),
+              completed: 0,
+              total: providersToUpdate.length,
+            });
+
+            const results = await runBatchTasks({
+              items: providersToUpdate,
+              worker: ([provider, mappings]) => {
                 const nextMappings = mappings.filter(
                   (m) => (m.alias ?? '').trim().toLowerCase() !== aliasKey
                 );
@@ -451,12 +506,18 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
                   return authFilesApi.deleteOauthModelAlias(provider);
                 }
                 return authFilesApi.saveOauthModelAlias(provider, nextMappings);
-              })
-            );
+              },
+              onProgress: ({ completed, total }) => {
+                setBatchProgress({
+                  active: true,
+                  label: t('auth_files.batch_alias_delete_progress'),
+                  completed,
+                  total,
+                });
+              },
+            });
 
-            const failures = results.filter(
-              (result): result is PromiseRejectedResult => result.status === 'rejected'
-            );
+            const failures = results.filter((result) => result.status === 'rejected');
 
             if (failures.length > 0) {
               hadFailure = true;
@@ -464,6 +525,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
               failureMessage = reason instanceof Error ? reason.message : String(reason ?? '');
             }
           } finally {
+            setBatchProgress(IDLE_BATCH_PROGRESS_STATE);
             await loadModelAlias();
           }
 
@@ -490,6 +552,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
     modelAliasError,
     allProviderModels,
     providerList,
+    batchProgress,
     loadExcluded,
     loadModelAlias,
     deleteExcluded,
