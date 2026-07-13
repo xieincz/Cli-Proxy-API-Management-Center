@@ -1,140 +1,155 @@
 @use '../styles/mixins' as *;
+@use '../styles/variables' as *;
 
 .container {
-  width: 100%;
+  width: min(100%, 1480px);
   min-height: 100%;
   display: flex;
   flex-direction: column;
+  gap: clamp(18px, 2.4vw, 28px);
+  margin: 0 auto;
   overflow-y: auto;
   padding-bottom: calc(
     var(--config-action-bar-height, 0px) + 16px + env(safe-area-inset-bottom) + #{$spacing-md}
   );
 }
 
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+}
+
+.pageHeaderCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  width: min(100%, 360px);
+}
+
 .pageTitle {
   font-size: 28px;
   font-weight: 700;
   color: var(--text-primary);
-  margin: 0 0 $spacing-md 0;
-}
-
-.description {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin: 0 0 $spacing-xl 0;
+  margin: 0;
 }
 
 .tabBar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-  margin-bottom: $spacing-lg;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  border-radius: $radius-full;
-  width: fit-content;
-  max-width: 100%;
-  overflow-x: auto;
-  scrollbar-width: none;
-
-  &::-webkit-scrollbar {
-    display: none;
-  }
-
-  @include mobile {
-    width: 100%;
-
-    .tabItem {
-      flex: 1;
-    }
-  }
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
 }
 
 .tabItem {
   @include button-reset;
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: transparent;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 6px;
   border: 1px solid transparent;
-  border-radius: $radius-full;
-  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  white-space: nowrap;
   transition:
-    background-color 0.15s ease,
     color 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 
   &:hover:not(:disabled) {
     color: var(--text-primary);
-    background: var(--bg-tertiary);
+    background: color-mix(in srgb, var(--text-primary) 5%, transparent);
   }
 
   &:disabled {
-    opacity: 0.6;
+    opacity: 0.58;
     cursor: not-allowed;
-  }
-
-  &:focus {
-    outline: none;
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 2px;
   }
 }
 
 .tabActive {
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  border-color: var(--border-color);
-  box-shadow: var(--shadow);
+  color: var(--bg-primary);
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+}
+
+.workspaceShell {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-lg;
+  min-width: 0;
 }
 
 .content {
   display: flex;
   flex-direction: column;
   gap: $spacing-lg;
-  flex: 1;
   min-height: 0;
 }
 
+.sourceWorkspace {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.sourceToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 76%, transparent);
+
+  @include mobile {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .searchInputWrapper {
-  flex: 1;
+  min-width: 0;
   position: relative;
   display: flex;
   align-items: center;
 
-  // The shared Input component adds a wrapper (.form-group) with margin-bottom.
-  // In the floating toolbar we want the input to be compact.
   :global(.form-group) {
     margin-bottom: 0;
+    width: 100%;
   }
 }
 
 .searchInput {
-  flex: 1;
-  border-radius: $radius-full !important;
-  padding-right: 132px !important;
-}
-
-.searchCount {
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-  padding: 2px 8px;
-  border-radius: $radius-full;
-  pointer-events: none;
-  white-space: nowrap;
+  min-height: 38px !important;
+  border-radius: 6px !important;
+  padding-right: 128px !important;
+  background: var(--bg-secondary) !important;
 }
 
 .searchRight {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+
+.searchCount {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .searchButton {
@@ -142,13 +157,16 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: $radius-full;
-  background: var(--primary-color);
-  border: 1px solid var(--primary-color);
-  color: #fff;
-  transition: background-color $transition-fast, border-color $transition-fast, opacity $transition-fast;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--text-primary);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  transition:
+    background-color $transition-fast,
+    border-color $transition-fast,
+    opacity $transition-fast;
 
   &:hover:not(:disabled) {
     background: var(--primary-hover);
@@ -156,93 +174,59 @@
   }
 
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
   }
 }
 
 .searchActions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
 
   button {
-    min-width: 32px;
-    width: 32px;
-    height: 32px;
+    min-width: 38px;
+    width: 38px;
+    height: 38px;
     padding: 0 !important;
-    border-radius: $radius-full;
+    border-radius: 6px;
   }
-}
-
-.controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: $spacing-md;
 
   @include mobile {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
+    justify-content: stretch;
 
-.status {
-  font-size: 14px;
-  color: var(--text-secondary);
-
-  &.modified {
-    color: var(--warning-color);
-  }
-
-  &.saved {
-    color: var(--success-color);
-  }
-
-  &.error {
-    color: var(--danger-color);
+    button {
+      flex: 1;
+      width: auto;
+    }
   }
 }
 
 .editorWrapper {
   width: 100%;
   flex: 0 0 auto;
-  height: clamp(360px, 60vh, 920px);
+  height: clamp(500px, 70vh, 1040px);
   border: 1px solid var(--border-color);
-  border-radius: $radius-lg;
+  border-radius: 8px;
   overflow: hidden;
-  position: relative;
-  --floating-controls-height: 0px;
+  background: var(--bg-primary);
 
   @supports (height: 100dvh) {
-    height: clamp(360px, 60dvh, 920px);
+    height: clamp(500px, 70dvh, 1040px);
   }
 
-  // Floating search toolbar on top of the editor (but not covering content).
-  .floatingControls {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    right: 12px;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    gap: $spacing-sm;
-    flex-wrap: wrap;
-    pointer-events: auto;
-  }
-
-  // CodeMirror theme overrides
   :global {
     .cm-editor {
       height: 100%;
-      font-size: 14px;
-      font-family: 'Consolas', 'Monaco', 'Menlo', monospace;
+      font-size: 13px;
+      font-family:
+        ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+        monospace;
+      background: transparent;
     }
 
     .cm-scroller {
       overflow: auto;
-      padding-top: calc(var(--floating-controls-height, 0px) + #{$spacing-md});
       -webkit-overflow-scrolling: touch;
       touch-action: pan-x pan-y;
       overscroll-behavior: contain;
@@ -250,7 +234,7 @@
 
     .cm-gutters {
       border-right: 1px solid var(--border-color);
-      background: var(--bg-secondary);
+      background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
     }
 
     .cm-lineNumbers .cm-gutterElement {
@@ -259,60 +243,42 @@
       color: var(--text-muted);
     }
 
-    .cm-activeLine {
-      background: var(--bg-hover);
-    }
-
+    .cm-activeLine,
     .cm-activeLineGutter {
-      background: var(--bg-hover);
+      background: color-mix(in srgb, var(--text-primary) 5%, transparent);
     }
 
     .cm-selectionMatch {
-      background: rgba(255, 193, 7, 0.3);
+      background: rgba(224, 170, 20, 0.24);
     }
 
     .cm-searchMatch {
-      background: rgba(255, 193, 7, 0.4);
-      outline: 1px solid rgba(255, 193, 7, 0.6);
+      background: rgba(224, 170, 20, 0.32);
+      outline: 1px solid rgba(224, 170, 20, 0.48);
     }
 
     .cm-searchMatch-selected {
-      background: rgba(255, 152, 0, 0.5);
-    }
-
-    // Dark theme adjustments
-    [data-theme='dark'] & {
-      .cm-gutters {
-        background: var(--bg-tertiary);
-      }
-
-      .cm-selectionMatch {
-        background: rgba(255, 193, 7, 0.2);
-      }
+      background: rgba(198, 87, 70, 0.32);
     }
   }
 }
 
-.configCard {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: visible;
+.modified {
+  color: var(--warning-text);
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
 }
 
-.actions {
-  display: flex;
-  gap: $spacing-sm;
-  justify-content: flex-end;
+.saved {
+  color: var(--success-color);
+  background: color-mix(in srgb, var(--success-color) 10%, transparent);
+  border-color: color-mix(in srgb, var(--success-color) 34%, var(--border-color));
+}
 
-  @include mobile {
-    justify-content: stretch;
-
-    button {
-      flex: 1;
-    }
-  }
+.error {
+  color: var(--warning-text);
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
 }
 
 .floatingActionContainer {
@@ -329,16 +295,14 @@
 .floatingActionList {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
-  border-radius: 999px;
-  box-shadow: var(--shadow-lg);
+  gap: 6px;
+  padding: 6px;
   max-width: inherit;
   overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+  box-shadow: var(--shadow-lg);
   scrollbar-width: none;
 
   &::-webkit-scrollbar {
@@ -347,16 +311,28 @@
 }
 
 .floatingStatus {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  color: var(--text-primary);
   font-size: 11px;
-  font-weight: 600;
-  padding: 5px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  font-weight: 700;
+  line-height: 1.2;
   text-align: center;
-  max-width: min(280px, 46vw);
+  max-width: min(300px, 46vw);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.floatingStatusCompact {
+  max-width: 112px;
+  padding: 0 8px;
+  font-size: 10px;
 }
 
 .floatingActionButton {
@@ -365,26 +341,24 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 999px;
-  cursor: pointer;
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
   color: var(--text-primary);
-  transition: background-color 0.2s ease, transform 0.15s ease;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
 
   &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--text-primary) 10%, transparent);
-    transform: scale(1.08);
-  }
-
-  &:active:not(:disabled) {
-    transform: scale(0.95);
+    background: var(--text-primary);
+    color: var(--bg-primary);
   }
 
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
-    transform: none;
   }
 }
 
@@ -396,7 +370,7 @@
   height: 7px;
   border-radius: 999px;
   background: var(--warning-color);
-  box-shadow: 0 0 0 2px rgba($warning-color, 0.25);
+  box-shadow: 0 0 0 2px var(--bg-primary);
 }
 
 @media (max-width: 1200px) {
@@ -405,37 +379,17 @@
     max-width: calc(100vw - 16px);
   }
 
-  .floatingActionList {
-    gap: 6px;
-    padding: 8px 10px;
-  }
-
   .floatingStatus {
-    display: none;
-  }
-
-  .floatingActionButton {
-    width: 38px;
-    height: 38px;
-    flex: 0 0 auto;
+    max-width: min(180px, 40vw);
   }
 }
 
-@media (max-height: 820px) {
-  .pageTitle {
-    font-size: 24px;
-    margin-bottom: $spacing-sm;
+@media (max-width: 480px) {
+  .floatingStatus {
+    max-width: min(132px, 38vw);
   }
 
-  .description {
-    margin-bottom: $spacing-lg;
-  }
-
-  .content {
-    gap: $spacing-md;
-  }
-
-  .configCard {
-    padding: $spacing-md;
+  .searchInput {
+    padding-right: 108px !important;
   }
 }

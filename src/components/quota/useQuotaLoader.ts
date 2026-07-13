@@ -5,12 +5,13 @@
 import { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AuthFileItem } from '@/types';
-import { useQuotaStore } from '@/stores';
+import {
+  captureQuotaCacheGeneration,
+  commitIfQuotaCacheCurrent,
+  useQuotaStore,
+} from '@/stores';
 import { getStatusFromError } from '@/utils/quota';
-import type { QuotaConfig, QuotaFetchOptions } from './quotaConfigs';
-
-type QuotaScope = 'page' | 'all';
-const DEFAULT_ALL_SCOPE_CONCURRENCY = 10;
+import type { QuotaConfig } from './quotaConfigs';
 
 type QuotaUpdater<T> = T | ((prev: T) => T);
 
@@ -24,12 +25,10 @@ interface LoadQuotaResult<TData> {
   errorStatus?: number;
 }
 
-interface LoadQuotaOptions {
-  scope: QuotaScope;
-  setLoading: (loading: boolean, scope?: QuotaScope | null) => void;
-  fetchOptions?: QuotaFetchOptions;
+export interface LoadQuotaOptions {
   concurrency?: number;
-  onProgress?: (progress: { completed: number; total: number }) => void;
+  timeoutMs?: number;
+  onProgress?: (completed: number, total: number) => void;
 }
 
 export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>) {
@@ -43,12 +42,16 @@ export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>
   const requestIdRef = useRef(0);
 
   const loadQuota = useCallback(
-    async (targets: AuthFileItem[], options: LoadQuotaOptions) => {
-      const { scope, setLoading, fetchOptions, concurrency, onProgress } = options;
+    async (
+      targets: AuthFileItem[],
+      setLoading: (loading: boolean) => void,
+      options: LoadQuotaOptions = {}
+    ) => {
       if (loadingRef.current) return;
       loadingRef.current = true;
       const requestId = ++requestIdRef.current;
-      setLoading(true, scope);
+      const cacheGeneration = captureQuotaCacheGeneration();
+      setLoading(true);
 
       try {
         if (targets.length === 0) return;
@@ -61,62 +64,47 @@ export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>
           return nextState;
         });
 
-        const total = targets.length;
+        const results: LoadQuotaResult<TData>[] = [];
+        const concurrency = Math.max(1, Math.min(options.concurrency ?? targets.length, targets.length));
+        let cursor = 0;
         let completed = 0;
-        let nextIndex = 0;
-
-        const workerCount = Math.max(
-          1,
-          Math.min(
-            total,
-            concurrency ?? (scope === 'all' ? DEFAULT_ALL_SCOPE_CONCURRENCY : total)
-          )
-        );
-
-        const applyResult = (result: LoadQuotaResult<TData>) => {
-          if (requestId !== requestIdRef.current) return;
-
-          setQuota((prev) => {
-            const nextState = { ...prev };
-            if (result.status === 'success') {
-              nextState[result.name] = config.buildSuccessState(result.data as TData);
-            } else {
-              nextState[result.name] = config.buildErrorState(
-                result.error || t('common.unknown_error'),
-                result.errorStatus
-              );
+        const worker = async () => {
+          while (cursor < targets.length) {
+            const file = targets[cursor++];
+            let result: LoadQuotaResult<TData>;
+            try {
+              const data = await config.fetchQuota(file, t, { timeoutMs: options.timeoutMs });
+              result = { name: file.name, status: 'success', data };
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : t('common.unknown_error');
+              const errorStatus = getStatusFromError(err);
+              result = { name: file.name, status: 'error', error: message, errorStatus };
             }
-            return nextState;
-          });
-
-          completed += 1;
-          onProgress?.({ completed, total });
-        };
-
-        const loadSingleQuota = async (file: AuthFileItem): Promise<LoadQuotaResult<TData>> => {
-          try {
-            const data = await config.fetchQuota(file, t, fetchOptions);
-            return { name: file.name, status: 'success', data };
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : t('common.unknown_error');
-            const errorStatus = getStatusFromError(err);
-            return { name: file.name, status: 'error', error: message, errorStatus };
+            results.push(result);
+            completed += 1;
+            options.onProgress?.(completed, targets.length);
           }
         };
+        await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
-        await Promise.all(
-          Array.from({ length: workerCount }, async () => {
-            while (true) {
-              const currentIndex = nextIndex;
-              nextIndex += 1;
-              if (currentIndex >= total) return;
+        if (requestId !== requestIdRef.current) return;
 
-              const file = targets[currentIndex];
-              const result = await loadSingleQuota(file);
-              applyResult(result);
-            }
-          })
-        );
+        commitIfQuotaCacheCurrent(cacheGeneration, () => {
+          setQuota((prev) => {
+            const nextState = { ...prev };
+            results.forEach((result) => {
+              if (result.status === 'success') {
+                nextState[result.name] = config.buildSuccessState(result.data as TData);
+              } else {
+                nextState[result.name] = config.buildErrorState(
+                  result.error || t('common.unknown_error'),
+                  result.errorStatus
+                );
+              }
+            });
+            return nextState;
+          });
+        });
       } finally {
         if (requestId === requestIdRef.current) {
           setLoading(false);

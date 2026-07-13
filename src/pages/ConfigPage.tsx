@@ -1,23 +1,31 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
-import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
-import { yaml } from '@codemirror/lang-yaml';
-import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
-import { keymap } from '@codemirror/view';
+import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { parse as parseYaml, parseDocument } from 'yaml';
-import { Card } from '@/components/ui/Card';
+import { usePageTransitionLayer } from '@/components/common/PageTransitionLayer';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { IconCheck, IconChevronDown, IconChevronUp, IconRefreshCw, IconSearch } from '@/components/ui/icons';
+import {
+  IconCheck,
+  IconChevronDown,
+  IconChevronUp,
+  IconRefreshCw,
+  IconSearch,
+} from '@/components/ui/icons';
 import { VisualConfigEditor } from '@/components/config/VisualConfigEditor';
 import { DiffModal } from '@/components/config/DiffModal';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useActionBarHeightVar } from '@/hooks/useActionBarHeightVar';
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { useVisualConfig } from '@/hooks/useVisualConfig';
-import { useNotificationStore, useAuthStore, useThemeStore } from '@/stores';
+import { useNotificationStore, useAuthStore, useThemeStore, useConfigStore } from '@/stores';
 import { configFileApi } from '@/services/api/configFile';
 import styles from './ConfigPage.module.scss';
 
 type ConfigEditorTab = 'visual' | 'source';
+
+const LazyConfigSourceEditor = lazy(() => import('@/components/config/ConfigSourceEditor'));
 
 function readCommercialModeFromYaml(yamlContent: string): boolean {
   try {
@@ -29,12 +37,24 @@ function readCommercialModeFromYaml(yamlContent: string): boolean {
   }
 }
 
+function normalizeYamlForVisualDiff(yamlContent: string): string {
+  try {
+    const doc = parseDocument(yamlContent);
+    return doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 });
+  } catch {
+    return yamlContent;
+  }
+}
+
 export function ConfigPage() {
   const { t } = useTranslation();
+  const pageTransitionLayer = usePageTransitionLayer();
+  const isCurrentLayer = pageTransitionLayer ? pageTransitionLayer.isCurrentLayer : true;
   const showNotification = useNotificationStore((state) => state.showNotification);
   const showConfirmation = useNotificationStore((state) => state.showConfirmation);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
+  const isMobile = useMediaQuery('(max-width: 768px)');
 
   const {
     visualValues,
@@ -44,7 +64,7 @@ export function ConfigPage() {
     visualHasPayloadValidationErrors,
     loadVisualValuesFromYaml,
     applyVisualChangesToYaml,
-    setVisualValues
+    setVisualValues,
   } = useVisualConfig();
 
   const [activeTab, setActiveTab] = useState<ConfigEditorTab>(() => {
@@ -61,22 +81,41 @@ export function ConfigPage() {
   const [diffModalOpen, setDiffModalOpen] = useState(false);
   const [serverYaml, setServerYaml] = useState('');
   const [mergedYaml, setMergedYaml] = useState('');
+  const [previewServerYaml, setPreviewServerYaml] = useState('');
+  const [previewTab, setPreviewTab] = useState<ConfigEditorTab>('visual');
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const [searchResults, setSearchResults] = useState<{ current: number; total: number }>({
+    current: 0,
+    total: 0,
+  });
   const [lastSearchedQuery, setLastSearchedQuery] = useState('');
-  const editorRef = useRef<ReactCodeMirrorRef>(null);
-  const floatingControlsRef = useRef<HTMLDivElement>(null);
-  const editorWrapperRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<ReactCodeMirrorRef | null>(null);
   const floatingActionsRef = useRef<HTMLDivElement>(null);
 
   const disableControls = connectionStatus !== 'connected';
   const isDirty = dirty || visualDirty;
+  const shouldRenderFloatingActions = isCurrentLayer;
   const hasVisualModeError = !!visualParseError;
   const hasVisualValidationErrors =
     activeTab === 'visual' &&
     (Object.values(visualValidationErrors).some(Boolean) || visualHasPayloadValidationErrors);
+  const unsavedChangesDialog = useMemo(
+    () => ({
+      title: t('common.unsaved_changes_title'),
+      message: t('common.unsaved_changes_message'),
+      confirmText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+    }),
+    [t]
+  );
+
+  useUnsavedChangesGuard({
+    enabled: isCurrentLayer,
+    shouldBlock: isDirty,
+    dialog: unsavedChangesDialog,
+  });
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -88,6 +127,7 @@ export function ConfigPage() {
       setDiffModalOpen(false);
       setServerYaml(data);
       setMergedYaml(data);
+      setPreviewServerYaml(data);
       loadVisualValuesFromYaml(data);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t('notification.refresh_failed');
@@ -115,7 +155,30 @@ export function ConfigPage() {
   const handleConfirmSave = async () => {
     setSaving(true);
     try {
-      const previousCommercialMode = readCommercialModeFromYaml(serverYaml);
+      const latestServerYaml = await configFileApi.fetchConfigYaml();
+      if (latestServerYaml !== previewServerYaml) {
+        const nextMergedYaml =
+          previewTab === 'visual' && !dirty
+            ? applyVisualChangesToYaml(latestServerYaml)
+            : mergedYaml;
+        const nextServerYaml =
+          previewTab === 'visual' ? normalizeYamlForVisualDiff(latestServerYaml) : latestServerYaml;
+
+        setPreviewServerYaml(latestServerYaml);
+        setServerYaml(nextServerYaml);
+        setMergedYaml(nextMergedYaml);
+
+        if (nextServerYaml === nextMergedYaml) {
+          setDirty(false);
+          setDiffModalOpen(false);
+          setContent(latestServerYaml);
+          loadVisualValuesFromYaml(latestServerYaml);
+          showNotification(t('config_management.diff.no_changes'), 'info');
+        }
+        return;
+      }
+
+      const previousCommercialMode = readCommercialModeFromYaml(latestServerYaml);
       const nextCommercialMode = readCommercialModeFromYaml(mergedYaml);
       const commercialModeChanged = previousCommercialMode !== nextCommercialMode;
 
@@ -126,7 +189,26 @@ export function ConfigPage() {
       setContent(latestContent);
       setServerYaml(latestContent);
       setMergedYaml(latestContent);
+      setPreviewServerYaml(latestContent);
       loadVisualValuesFromYaml(latestContent);
+
+      // Keep the global config store in sync so sidebar / other pages reflect YAML changes immediately.
+      try {
+        useConfigStore.getState().clearCache();
+        await useConfigStore.getState().fetchConfig(true);
+      } catch (refreshError: unknown) {
+        const message =
+          refreshError instanceof Error
+            ? refreshError.message
+            : typeof refreshError === 'string'
+              ? refreshError
+              : '';
+        showNotification(
+          `${t('notification.refresh_failed')}${message ? `: ${message}` : ''}`,
+          'error'
+        );
+      }
+
       showNotification(t('config_management.save_success'), 'success');
       if (commercialModeChanged) {
         showNotification(t('notification.commercial_mode_restart_required'), 'warning');
@@ -149,32 +231,49 @@ export function ConfigPage() {
     try {
       const latestServerYaml = await configFileApi.fetchConfigYaml();
 
+      const visualBaseYaml = dirty ? content : latestServerYaml;
+
       if (activeTab !== 'source') {
         const latestDocument = parseDocument(latestServerYaml);
         if (latestDocument.errors.length > 0) {
           showNotification(
             t('config_management.visual_mode_latest_yaml_invalid', {
-              message: latestDocument.errors[0]?.message ?? t('config_management.visual_mode_save_blocked')
+              message:
+                latestDocument.errors[0]?.message ??
+                t('config_management.visual_mode_save_blocked'),
             }),
             'error'
           );
           return;
         }
+
+        if (visualBaseYaml !== latestServerYaml) {
+          const visualBaseDocument = parseDocument(visualBaseYaml);
+          if (visualBaseDocument.errors.length > 0) {
+            showNotification(
+              t('config_management.visual_mode_latest_yaml_invalid', {
+                message:
+                  visualBaseDocument.errors[0]?.message ??
+                  t('config_management.visual_mode_save_blocked'),
+              }),
+              'error'
+            );
+            return;
+          }
+        }
       }
 
-      // In source mode, save exactly what the user edited. In visual mode, materialize visual changes into the latest YAML.
+      // In source mode, save exactly what the user edited. In visual mode, preserve the
+      // local source draft when it has unsaved edits so source-only backend fields are not dropped.
       const nextMergedYaml =
-        activeTab === 'source' ? content : applyVisualChangesToYaml(latestServerYaml);
+        activeTab === 'source' ? content : applyVisualChangesToYaml(visualBaseYaml);
 
       // In visual mode, applyVisualChangesToYaml re-serializes YAML via parseDocument → toString,
       // which may reformat comments/whitespace. Normalize the server YAML through the same pipeline
       // so the diff only shows actual value changes, not cosmetic reformatting.
       let diffOriginal = latestServerYaml;
       if (activeTab !== 'source') {
-        try {
-          const doc = parseDocument(latestServerYaml);
-          diffOriginal = doc.toString({ indent: 2, lineWidth: 120, minContentWidth: 0 });
-        } catch { /* keep raw on parse failure */ }
+        diffOriginal = normalizeYamlForVisualDiff(latestServerYaml);
       }
 
       if (diffOriginal === nextMergedYaml) {
@@ -182,6 +281,7 @@ export function ConfigPage() {
         setContent(latestServerYaml);
         setServerYaml(latestServerYaml);
         setMergedYaml(nextMergedYaml);
+        setPreviewServerYaml(latestServerYaml);
         loadVisualValuesFromYaml(latestServerYaml);
         showNotification(t('config_management.diff.no_changes'), 'info');
         return;
@@ -189,6 +289,8 @@ export function ConfigPage() {
 
       setServerYaml(diffOriginal);
       setMergedYaml(nextMergedYaml);
+      setPreviewServerYaml(latestServerYaml);
+      setPreviewTab(activeTab);
       setDiffModalOpen(true);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '';
@@ -203,32 +305,43 @@ export function ConfigPage() {
     setDirty(true);
   }, []);
 
-  const handleTabChange = useCallback((tab: ConfigEditorTab) => {
-    if (tab === activeTab) return;
+  const handleTabChange = useCallback(
+    (tab: ConfigEditorTab) => {
+      if (tab === activeTab) return;
 
-    if (tab === 'source') {
-      // Only rewrite YAML when there are pending visual changes; otherwise preserve raw YAML + comments.
-      if (visualDirty) {
-        const nextContent = applyVisualChangesToYaml(content);
-        if (nextContent !== content) {
-          setContent(nextContent);
-          setDirty(true);
+      if (tab === 'source') {
+        // Only rewrite YAML when there are pending visual changes; otherwise preserve raw YAML + comments.
+        if (visualDirty) {
+          const nextContent = applyVisualChangesToYaml(content);
+          if (nextContent !== content) {
+            setContent(nextContent);
+            setDirty(true);
+          }
+        }
+      } else {
+        const result = loadVisualValuesFromYaml(content);
+        if (!result.ok) {
+          showNotification(
+            t('config_management.visual_mode_unavailable_detail', { message: result.error }),
+            'error'
+          );
+          return;
         }
       }
-    } else {
-      const result = loadVisualValuesFromYaml(content);
-      if (!result.ok) {
-        showNotification(
-          t('config_management.visual_mode_unavailable_detail', { message: result.error }),
-          'error'
-        );
-        return;
-      }
-    }
 
-    setActiveTab(tab);
-    localStorage.setItem('config-management:tab', tab);
-  }, [activeTab, applyVisualChangesToYaml, content, loadVisualValuesFromYaml, showNotification, t, visualDirty]);
+      setActiveTab(tab);
+      localStorage.setItem('config-management:tab', tab);
+    },
+    [
+      activeTab,
+      applyVisualChangesToYaml,
+      content,
+      loadVisualValuesFromYaml,
+      showNotification,
+      t,
+      visualDirty,
+    ]
+  );
 
   // Search functionality
   const performSearch = useCallback((query: string, direction: 'next' | 'prev' = 'next') => {
@@ -290,7 +403,7 @@ export function ConfigPage() {
     // Scroll to and select the match
     view.dispatch({
       selection: { anchor: matchPos, head: matchPos + query.length },
-      scrollIntoView: true
+      scrollIntoView: true,
     });
     view.focus();
   }, []);
@@ -306,18 +419,24 @@ export function ConfigPage() {
     }
   }, []);
 
-  const executeSearch = useCallback((direction: 'next' | 'prev' = 'next') => {
-    if (!searchQuery) return;
-    setLastSearchedQuery(searchQuery);
-    performSearch(searchQuery, direction);
-  }, [searchQuery, performSearch]);
+  const executeSearch = useCallback(
+    (direction: 'next' | 'prev' = 'next') => {
+      if (!searchQuery) return;
+      setLastSearchedQuery(searchQuery);
+      performSearch(searchQuery, direction);
+    },
+    [searchQuery, performSearch]
+  );
 
-  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      executeSearch(e.shiftKey ? 'prev' : 'next');
-    }
-  }, [executeSearch]);
+  const handleSearchKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        executeSearch(e.shiftKey ? 'prev' : 'next');
+      }
+    },
+    [executeSearch]
+  );
 
   const handlePrevMatch = useCallback(() => {
     if (!lastSearchedQuery) return;
@@ -329,63 +448,12 @@ export function ConfigPage() {
     performSearch(lastSearchedQuery, 'next');
   }, [lastSearchedQuery, performSearch]);
 
-  // Keep floating controls from covering editor content by syncing its height to a CSS variable.
-  useLayoutEffect(() => {
-    if (activeTab !== 'source') return;
-
-    const controlsEl = floatingControlsRef.current;
-    const wrapperEl = editorWrapperRef.current;
-    if (!controlsEl || !wrapperEl) return;
-
-    const updatePadding = () => {
-      const height = controlsEl.getBoundingClientRect().height;
-      wrapperEl.style.setProperty('--floating-controls-height', `${height}px`);
-    };
-
-    updatePadding();
-    window.addEventListener('resize', updatePadding);
-
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePadding);
-    ro?.observe(controlsEl);
-
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener('resize', updatePadding);
-    };
-  }, [activeTab]);
-
   // Keep bottom floating actions from covering page content by syncing its height to a CSS variable.
-  useLayoutEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const actionsEl = floatingActionsRef.current;
-    if (!actionsEl) return;
-
-    const updatePadding = () => {
-      const height = actionsEl.getBoundingClientRect().height;
-      document.documentElement.style.setProperty('--config-action-bar-height', `${height}px`);
-    };
-
-    updatePadding();
-    window.addEventListener('resize', updatePadding);
-
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePadding);
-    ro?.observe(actionsEl);
-
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener('resize', updatePadding);
-      document.documentElement.style.removeProperty('--config-action-bar-height');
-    };
-  }, []);
-
-  // CodeMirror extensions
-  const extensions = useMemo(() => [
-    yaml(),
-    search(),
-    highlightSelectionMatches(),
-    keymap.of(searchKeymap)
-  ], []);
+  useActionBarHeightVar(
+    floatingActionsRef,
+    '--config-action-bar-height',
+    shouldRenderFloatingActions
+  );
 
   // Status text
   const getStatusText = () => {
@@ -393,26 +461,33 @@ export function ConfigPage() {
     if (loading) return t('config_management.status_loading');
     if (error) return t('config_management.status_load_failed');
     if (hasVisualModeError) return t('config_management.visual_mode_unavailable');
-    if (hasVisualValidationErrors) return t('config_management.visual.validation.validation_blocked');
+    if (hasVisualValidationErrors)
+      return t('config_management.visual.validation.validation_blocked');
     if (saving) return t('config_management.status_saving');
     if (isDirty) return t('config_management.status_dirty');
     return t('config_management.status_loaded');
   };
-
-  const isLoadedStatus =
-    !disableControls &&
-    !loading &&
-    !error &&
-    !saving &&
-    !isDirty &&
-    !hasVisualModeError &&
-    !hasVisualValidationErrors;
 
   const getStatusClass = () => {
     if (error || hasVisualModeError || hasVisualValidationErrors) return styles.error;
     if (isDirty) return styles.modified;
     if (!loading && !saving) return styles.saved;
     return '';
+  };
+
+  const getFloatingStatusText = () => {
+    if (!isMobile) return getStatusText();
+    if (disableControls)
+      return t('config_management.status_disconnected_short', { defaultValue: 'Disconnected' });
+    if (loading) return t('config_management.status_loading_short', { defaultValue: 'Loading' });
+    if (error) return t('config_management.status_load_failed_short', { defaultValue: 'Failed' });
+    if (hasVisualModeError)
+      return t('config_management.visual_mode_unavailable_short', { defaultValue: 'YAML issue' });
+    if (hasVisualValidationErrors)
+      return t('config_management.visual.validation_blocked_short', { defaultValue: 'Fix errors' });
+    if (saving) return t('config_management.status_saving_short', { defaultValue: 'Saving' });
+    if (isDirty) return t('config_management.status_dirty_short', { defaultValue: 'Unsaved' });
+    return t('config_management.status_loaded_short', { defaultValue: 'Loaded' });
   };
 
   const handleReload = useCallback(() => {
@@ -436,7 +511,13 @@ export function ConfigPage() {
   const floatingActions = (
     <div className={styles.floatingActionContainer} ref={floatingActionsRef}>
       <div className={styles.floatingActionList}>
-        <div className={`${styles.floatingStatus} ${styles.status} ${getStatusClass()}`}>{getStatusText()}</div>
+        <div
+          className={`${styles.floatingStatus} ${
+            isMobile ? styles.floatingStatusCompact : ''
+          } ${getStatusClass()}`}
+        >
+          {getFloatingStatusText()}
+        </div>
         <button
           type="button"
           className={styles.floatingActionButton}
@@ -472,29 +553,31 @@ export function ConfigPage() {
 
   return (
     <div className={styles.container}>
-      <h1 className={styles.pageTitle}>{t('config_management.title')}</h1>
-      <p className={styles.description}>{t('config_management.description')}</p>
-
-      <div className={styles.tabBar}>
-        <button
-          type="button"
-          className={`${styles.tabItem} ${activeTab === 'visual' ? styles.tabActive : ''}`}
-          onClick={() => handleTabChange('visual')}
-          disabled={saving || loading}
-        >
-          {t('config_management.tabs.visual', { defaultValue: '可视化编辑' })}
-        </button>
-        <button
-          type="button"
-          className={`${styles.tabItem} ${activeTab === 'source' ? styles.tabActive : ''}`}
-          onClick={() => handleTabChange('source')}
-          disabled={saving || loading}
-        >
-          {t('config_management.tabs.source', { defaultValue: '源代码编辑' })}
-        </button>
+      <div className={styles.pageHeader}>
+        <div className={styles.pageHeaderCopy}>
+          <h1 className={styles.pageTitle}>{t('config_management.title')}</h1>
+          <div className={styles.tabBar}>
+            <button
+              type="button"
+              className={`${styles.tabItem} ${activeTab === 'visual' ? styles.tabActive : ''}`}
+              onClick={() => handleTabChange('visual')}
+              disabled={saving || loading}
+            >
+              {t('config_management.tabs.visual', { defaultValue: '可视化编辑' })}
+            </button>
+            <button
+              type="button"
+              className={`${styles.tabItem} ${activeTab === 'source' ? styles.tabActive : ''}`}
+              onClick={() => handleTabChange('source')}
+              disabled={saving || loading}
+            >
+              {t('config_management.tabs.source', { defaultValue: '源代码编辑' })}
+            </button>
+          </div>
+        </div>
       </div>
 
-      <Card className={styles.configCard}>
+      <div className={styles.workspaceShell}>
         <div className={styles.content}>
           {error && <div className="error-box">{error}</div>}
           {!error && visualParseError && (
@@ -507,20 +590,20 @@ export function ConfigPage() {
             <VisualConfigEditor
               values={visualValues}
               validationErrors={visualValidationErrors}
+              hasPayloadValidationErrors={visualHasPayloadValidationErrors}
               disabled={disableControls || loading}
               onChange={setVisualValues}
             />
           ) : (
-            <div className={styles.editorWrapper} ref={editorWrapperRef}>
-              {/* Floating search controls */}
-              <div className={styles.floatingControls} ref={floatingControlsRef}>
+            <div className={styles.sourceWorkspace}>
+              <div className={styles.sourceToolbar}>
                 <div className={styles.searchInputWrapper}>
                   <Input
                     value={searchQuery}
                     onChange={(e) => handleSearchChange(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
                     placeholder={t('config_management.search_placeholder', {
-                      defaultValue: '搜索配置内容...'
+                      defaultValue: '搜索配置内容...',
                     })}
                     disabled={disableControls || loading}
                     className={styles.searchInput}
@@ -530,7 +613,9 @@ export function ConfigPage() {
                           <span className={styles.searchCount}>
                             {searchResults.total > 0
                               ? `${searchResults.current} / ${searchResults.total}`
-                              : t('config_management.search_no_results', { defaultValue: '无结果' })}
+                              : t('config_management.search_no_results', {
+                                  defaultValue: '无结果',
+                                })}
                           </span>
                         )}
                         <button
@@ -546,12 +631,15 @@ export function ConfigPage() {
                     }
                   />
                 </div>
+
                 <div className={styles.searchActions}>
                   <Button
                     variant="secondary"
                     size="sm"
                     onClick={handlePrevMatch}
-                    disabled={!searchQuery || lastSearchedQuery !== searchQuery || searchResults.total === 0}
+                    disabled={
+                      !searchQuery || lastSearchedQuery !== searchQuery || searchResults.total === 0
+                    }
                     title={t('config_management.search_prev', { defaultValue: '上一个' })}
                   >
                     <IconChevronUp size={16} />
@@ -560,59 +648,36 @@ export function ConfigPage() {
                     variant="secondary"
                     size="sm"
                     onClick={handleNextMatch}
-                    disabled={!searchQuery || lastSearchedQuery !== searchQuery || searchResults.total === 0}
+                    disabled={
+                      !searchQuery || lastSearchedQuery !== searchQuery || searchResults.total === 0
+                    }
                     title={t('config_management.search_next', { defaultValue: '下一个' })}
                   >
                     <IconChevronDown size={16} />
                   </Button>
                 </div>
               </div>
-              <CodeMirror
-                ref={editorRef}
-                value={content}
-                onChange={handleChange}
-                extensions={extensions}
-                theme={resolvedTheme}
-                editable={!disableControls && !loading}
-                placeholder={t('config_management.editor_placeholder')}
-                height="100%"
-                style={{ height: '100%' }}
-                basicSetup={{
-                  lineNumbers: true,
-                  highlightActiveLineGutter: true,
-                  highlightActiveLine: true,
-                  foldGutter: true,
-                  dropCursor: true,
-                  allowMultipleSelections: true,
-                  indentOnInput: true,
-                  bracketMatching: true,
-                  closeBrackets: true,
-                  autocompletion: false,
-                  rectangularSelection: true,
-                  crosshairCursor: false,
-                  highlightSelectionMatches: true,
-                  closeBracketsKeymap: true,
-                  searchKeymap: true,
-                  foldKeymap: true,
-                  completionKeymap: false,
-                  lintKeymap: true
-                }}
-              />
+
+              <div className={styles.editorWrapper}>
+                <Suspense fallback={null}>
+                  <LazyConfigSourceEditor
+                    editorRef={editorRef}
+                    value={content}
+                    onChange={handleChange}
+                    theme={resolvedTheme}
+                    editable={!disableControls && !loading}
+                    placeholder={t('config_management.editor_placeholder')}
+                  />
+                </Suspense>
+              </div>
             </div>
           )}
-
-          {/* Controls */}
-          <div className={styles.controls}>
-            {!isLoadedStatus && (
-              <span className={`${styles.status} ${getStatusClass()}`}>
-                {getStatusText()}
-              </span>
-            )}
-          </div>
         </div>
-      </Card>
+      </div>
 
-      {typeof document !== 'undefined' ? createPortal(floatingActions, document.body) : null}
+      {shouldRenderFloatingActions && typeof document !== 'undefined'
+        ? createPortal(floatingActions, document.body)
+        : null}
       <DiffModal
         open={diffModalOpen}
         original={serverYaml}

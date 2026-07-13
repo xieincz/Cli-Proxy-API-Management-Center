@@ -1,8 +1,16 @@
-import type { AmpcodeConfig, AmpcodeModelMapping, AmpcodeUpstreamApiKeyMapping, ApiKeyEntry } from '@/types';
-import { buildCandidateUsageSourceIds, type KeyStatBucket, type KeyStats } from '@/utils/usage';
-import type { AmpcodeFormState, AmpcodeUpstreamApiKeyEntry, ModelEntry } from './types';
+import type { OpenAIProviderConfig } from '@/types';
+import {
+  buildRecentRequestCompositeKey,
+  mergeRecentRequestBucketGroups,
+  statusBarDataFromRecentRequests,
+  sumRecentRequests,
+  type RecentRequestBucket,
+  type RecentRequestUsageEntry,
+  type StatusBarData,
+} from '@/utils/recentRequests';
 
-export const DISABLE_ALL_MODELS_RULE = '*';
+const DISABLE_ALL_MODELS_RULE = '*';
+const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com';
 
 export const hasDisableAllModelsRule = (models?: string[]) =>
   Array.isArray(models) &&
@@ -18,25 +26,11 @@ export const withDisableAllModelsRule = (models?: string[]) => {
   return [...base, DISABLE_ALL_MODELS_RULE];
 };
 
-export const withoutDisableAllModelsRule = (models?: string[]) => {
-  const base = stripDisableAllModelsRule(models);
-  return base;
-};
+export const withoutDisableAllModelsRule = (models?: string[]) => stripDisableAllModelsRule(models);
 
-export const parseTextList = (text: string): string[] =>
-  text
-    .split(/[\n,]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-export const parseExcludedModels = parseTextList;
-
-export const excludedModelsToText = (models?: string[]) =>
-  Array.isArray(models) ? models.join('\n') : '';
-
-export const normalizeOpenAIBaseUrl = (baseUrl: string): string => {
+const normalizeUpstreamBaseUrl = (baseUrl: string, fallback = ''): string => {
   let trimmed = String(baseUrl || '').trim();
-  if (!trimmed) return '';
+  if (!trimmed) return fallback;
   trimmed = trimmed.replace(/\/?v0\/management\/?$/i, '');
   trimmed = trimmed.replace(/\/+$/g, '');
   if (!/^https?:\/\//i.test(trimmed)) {
@@ -45,27 +39,22 @@ export const normalizeOpenAIBaseUrl = (baseUrl: string): string => {
   return trimmed;
 };
 
-export const normalizeClaudeBaseUrl = (baseUrl: string): string => {
-  let trimmed = String(baseUrl || '').trim();
-  if (!trimmed) {
-    return 'https://api.anthropic.com';
-  }
-  trimmed = trimmed.replace(/\/?v0\/management\/?$/i, '');
-  trimmed = trimmed.replace(/\/+$/g, '');
-  if (!/^https?:\/\//i.test(trimmed)) {
-    trimmed = `http://${trimmed}`;
-  }
-  return trimmed;
-};
-
-export const buildOpenAIModelsEndpoint = (baseUrl: string): string => {
-  const trimmed = normalizeOpenAIBaseUrl(baseUrl);
+const buildGeminiModelResource = (model: string): string => {
+  const trimmed = String(model || '')
+    .trim()
+    .replace(/^\/+/g, '')
+    .replace(/:generateContent$/i, '');
   if (!trimmed) return '';
-  return `${trimmed}/models`;
+
+  if (/^(models|tunedModels)\//i.test(trimmed)) {
+    return trimmed.split('/').map(encodeURIComponent).join('/');
+  }
+
+  return `models/${encodeURIComponent(trimmed)}`;
 };
 
 export const buildOpenAIChatCompletionsEndpoint = (baseUrl: string): string => {
-  const trimmed = normalizeOpenAIBaseUrl(baseUrl);
+  const trimmed = normalizeUpstreamBaseUrl(baseUrl);
   if (!trimmed) return '';
   if (trimmed.endsWith('/chat/completions')) {
     return trimmed;
@@ -73,8 +62,23 @@ export const buildOpenAIChatCompletionsEndpoint = (baseUrl: string): string => {
   return `${trimmed}/chat/completions`;
 };
 
+export const buildCodexResponsesEndpoint = (baseUrl: string): string => {
+  const trimmed = normalizeUpstreamBaseUrl(baseUrl);
+  if (!trimmed) return '';
+  if (/\/v1\/responses$/i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/\/v1\/models$/i.test(trimmed)) {
+    return trimmed.replace(/\/models$/i, '/responses');
+  }
+  if (/\/v1$/i.test(trimmed)) {
+    return `${trimmed}/responses`;
+  }
+  return `${trimmed}/v1/responses`;
+};
+
 export const buildClaudeMessagesEndpoint = (baseUrl: string): string => {
-  const trimmed = normalizeClaudeBaseUrl(baseUrl);
+  const trimmed = normalizeUpstreamBaseUrl(baseUrl, 'https://api.anthropic.com');
   if (!trimmed) return '';
   if (trimmed.endsWith('/v1/messages')) {
     return trimmed;
@@ -85,126 +89,141 @@ export const buildClaudeMessagesEndpoint = (baseUrl: string): string => {
   return `${trimmed}/v1/messages`;
 };
 
-// 根据 source (apiKey) 获取统计数据 - 与旧版逻辑一致
-export const getStatsBySource = (
-  apiKey: string,
-  keyStats: KeyStats,
-  prefix?: string
-): KeyStatBucket => {
-  const bySource = keyStats.bySource ?? {};
-  const candidates = buildCandidateUsageSourceIds({ apiKey, prefix });
-  if (!candidates.length) {
-    return { success: 0, failure: 0 };
+export const buildGeminiGenerateContentEndpoint = (baseUrl: string, model: string): string => {
+  const resource = buildGeminiModelResource(model);
+  if (!resource) return '';
+
+  const trimmed = normalizeUpstreamBaseUrl(baseUrl, DEFAULT_GEMINI_BASE_URL);
+  if (!trimmed) return '';
+  if (/:generateContent$/i.test(trimmed)) {
+    return trimmed;
   }
 
-  let success = 0;
-  let failure = 0;
-  candidates.forEach((candidate) => {
-    const stats = bySource[candidate];
-    if (!stats) return;
-    success += stats.success;
-    failure += stats.failure;
-  });
-
-  return { success, failure };
-};
-
-// 对于 OpenAI 提供商，汇总所有 apiKeyEntries 的统计 - 与旧版逻辑一致
-export const getOpenAIProviderStats = (
-  apiKeyEntries: ApiKeyEntry[] | undefined,
-  keyStats: KeyStats,
-  providerPrefix?: string
-): KeyStatBucket => {
-  const bySource = keyStats.bySource ?? {};
-
-  const sourceIds = new Set<string>();
-  buildCandidateUsageSourceIds({ prefix: providerPrefix }).forEach((id) => sourceIds.add(id));
-  (apiKeyEntries || []).forEach((entry) => {
-    buildCandidateUsageSourceIds({ apiKey: entry?.apiKey }).forEach((id) => sourceIds.add(id));
-  });
-
-  let success = 0;
-  let failure = 0;
-  sourceIds.forEach((id) => {
-    const stats = bySource[id];
-    if (!stats) return;
-    success += stats.success;
-    failure += stats.failure;
-  });
-
-  return { success, failure };
-};
-
-export const buildApiKeyEntry = (input?: Partial<ApiKeyEntry>): ApiKeyEntry => ({
-  apiKey: input?.apiKey ?? '',
-  proxyUrl: input?.proxyUrl ?? '',
-  headers: input?.headers ?? {},
-});
-
-export const ampcodeMappingsToEntries = (mappings?: AmpcodeModelMapping[]): ModelEntry[] => {
-  if (!Array.isArray(mappings) || mappings.length === 0) {
-    return [{ name: '', alias: '' }];
-  }
-  return mappings.map((mapping) => ({
-    name: mapping.from ?? '',
-    alias: mapping.to ?? '',
-  }));
-};
-
-export const entriesToAmpcodeMappings = (entries: ModelEntry[]): AmpcodeModelMapping[] => {
-  const seen = new Set<string>();
-  const mappings: AmpcodeModelMapping[] = [];
-
-  entries.forEach((entry) => {
-    const from = entry.name.trim();
-    const to = entry.alias.trim();
-    if (!from || !to) return;
-    const key = from.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    mappings.push({ from, to });
-  });
-
-  return mappings;
-};
-
-export const ampcodeUpstreamApiKeysToEntries = (
-  mappings?: AmpcodeUpstreamApiKeyMapping[]
-): AmpcodeUpstreamApiKeyEntry[] => {
-  if (!Array.isArray(mappings) || mappings.length === 0) {
-    return [{ upstreamApiKey: '', clientApiKeysText: '' }];
+  let root = trimmed.replace(/\/+$/g, '');
+  if (/\/v1beta\/models$/i.test(root)) {
+    root = root.replace(/\/models$/i, '');
+  } else if (!/\/v1beta$/i.test(root)) {
+    root = root.replace(/\/v1beta(?:\/.*)?$/i, '');
+    root = `${root}/v1beta`;
   }
 
-  return mappings.map((mapping) => ({
-    upstreamApiKey: mapping.upstreamApiKey ?? '',
-    clientApiKeysText: Array.isArray(mapping.apiKeys) ? mapping.apiKeys.join('\n') : '',
-  }));
+  return `${root}/${resource}:generateContent`;
 };
 
-export const entriesToAmpcodeUpstreamApiKeys = (
-  entries: AmpcodeUpstreamApiKeyEntry[]
-): AmpcodeUpstreamApiKeyMapping[] => {
-  const seen = new Set<string>();
-  const mappings: AmpcodeUpstreamApiKeyMapping[] = [];
+export type ProviderRecentUsageMap = Map<string, Map<string, RecentRequestUsageEntry>>;
 
-  entries.forEach((entry) => {
-    const upstreamApiKey = String(entry?.upstreamApiKey ?? '').trim();
-    if (!upstreamApiKey || seen.has(upstreamApiKey)) return;
-
-    const apiKeys = Array.from(new Set(parseTextList(String(entry?.clientApiKeysText ?? ''))));
-    if (!apiKeys.length) return;
-
-    seen.add(upstreamApiKey);
-    mappings.push({ upstreamApiKey, apiKeys });
-  });
-
-  return mappings;
+const EMPTY_RECENT_USAGE_ENTRY: RecentRequestUsageEntry = {
+  success: 0,
+  failed: 0,
+  recentRequests: [],
 };
 
-export const buildAmpcodeFormState = (ampcode?: AmpcodeConfig | null): AmpcodeFormState => ({
-  upstreamUrl: ampcode?.upstreamUrl ?? '',
-  upstreamApiKey: '',
-  forceModelMappings: ampcode?.forceModelMappings ?? false,
-  mappingEntries: ampcodeMappingsToEntries(ampcode?.modelMappings),
-  upstreamApiKeyEntries: ampcodeUpstreamApiKeysToEntries(ampcode?.upstreamApiKeys),
-});
+const normalizeProviderRecentKey = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
+
+const getProviderRecentUsageEntry = (
+  usageByProvider: ProviderRecentUsageMap,
+  provider: string,
+  apiKey?: string,
+  baseUrl?: string
+): RecentRequestUsageEntry => {
+  if (!String(apiKey ?? '').trim()) {
+    return EMPTY_RECENT_USAGE_ENTRY;
+  }
+
+  const providerKey = normalizeProviderRecentKey(provider);
+  const compositeKey = buildRecentRequestCompositeKey(baseUrl, apiKey);
+  return usageByProvider.get(providerKey)?.get(compositeKey) ?? EMPTY_RECENT_USAGE_ENTRY;
+};
+
+const getProviderRecentBuckets = (
+  usageByProvider: ProviderRecentUsageMap,
+  provider: string,
+  apiKey?: string,
+  baseUrl?: string
+): RecentRequestBucket[] =>
+  getProviderRecentUsageEntry(usageByProvider, provider, apiKey, baseUrl).recentRequests;
+
+export function getProviderRecentStatusData(
+  usageByProvider: ProviderRecentUsageMap,
+  provider: string,
+  apiKey?: string,
+  baseUrl?: string
+): StatusBarData {
+  return statusBarDataFromRecentRequests(
+    getProviderRecentBuckets(usageByProvider, provider, apiKey, baseUrl)
+  );
+}
+
+export function getProviderTotalStats(
+  usageByProvider: ProviderRecentUsageMap,
+  provider: string,
+  apiKey?: string,
+  baseUrl?: string
+): { success: number; failure: number } {
+  const entry = getProviderRecentUsageEntry(usageByProvider, provider, apiKey, baseUrl);
+  return { success: entry.success, failure: entry.failed };
+}
+
+export function getProviderRecentWindowStats(
+  usageByProvider: ProviderRecentUsageMap,
+  provider: string,
+  apiKey?: string,
+  baseUrl?: string
+): { success: number; failure: number } {
+  return sumRecentRequests(getProviderRecentBuckets(usageByProvider, provider, apiKey, baseUrl));
+}
+
+const collectOpenAIProviderRecentBuckets = (
+  provider: OpenAIProviderConfig,
+  usageByProvider: ProviderRecentUsageMap
+): RecentRequestBucket[] => {
+  if (!provider.apiKeyEntries?.length) {
+    return [];
+  }
+
+  const groups = provider.apiKeyEntries.map((entry) =>
+    getProviderRecentBuckets(usageByProvider, provider.name, entry.apiKey, provider.baseUrl)
+  );
+
+  return mergeRecentRequestBucketGroups(groups);
+};
+
+export function getOpenAIProviderRecentWindowStats(
+  provider: OpenAIProviderConfig,
+  usageByProvider: ProviderRecentUsageMap
+): { success: number; failure: number } {
+  return sumRecentRequests(collectOpenAIProviderRecentBuckets(provider, usageByProvider));
+}
+
+export function getOpenAIProviderTotalStats(
+  provider: OpenAIProviderConfig,
+  usageByProvider: ProviderRecentUsageMap
+): { success: number; failure: number } {
+  return (provider.apiKeyEntries || []).reduce(
+    (total, entry) => {
+      const usageEntry = getProviderRecentUsageEntry(
+        usageByProvider,
+        provider.name,
+        entry.apiKey,
+        provider.baseUrl
+      );
+      return {
+        success: total.success + usageEntry.success,
+        failure: total.failure + usageEntry.failed,
+      };
+    },
+    { success: 0, failure: 0 }
+  );
+}
+
+export function getOpenAIProviderRecentStatusData(
+  provider: OpenAIProviderConfig,
+  usageByProvider: ProviderRecentUsageMap
+): StatusBarData {
+  return statusBarDataFromRecentRequests(
+    collectOpenAIProviderRecentBuckets(provider, usageByProvider)
+  );
+}

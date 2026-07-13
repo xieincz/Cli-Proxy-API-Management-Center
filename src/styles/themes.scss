@@ -11,6 +11,8 @@
   --bg-hover: var(--bg-tertiary);
   --bg-quinary: #f6f4ee;
   --bg-error-light: rgba(198, 87, 70, 0.1);
+  --floating-surface: #fffdf9;
+  --floating-shadow: 0 12px 26px rgba(0, 0, 0, 0.14);
 
   --text-primary: #2d2a26;
   --text-secondary: #6d6760;
@@ -29,6 +31,7 @@
   --primary-contrast: #ffffff;
 
   --success-color: #10b981;
+  --quota-medium-color: #e0aa14;
   --warning-color: #c65746; // 错误/警告色
   --error-color: #c65746;
   --danger-color: var(--error-color);
@@ -53,7 +56,29 @@
   --shadow-lg: 0 10px 18px -3px rgb(0 0 0 / 0.1);
 
   --radius-md: 8px;
-  --accent-tertiary: var(--bg-tertiary);
+
+  // Workbench tokens (Home parity)
+  --primary-8: color-mix(in srgb, var(--primary-color) 8%, transparent);
+  --primary-10: color-mix(in srgb, var(--primary-color) 10%, transparent);
+  --primary-30: color-mix(in srgb, var(--primary-color) 30%, transparent);
+  --amber-color: #d97706;
+  --amber-text: #92400e;
+  --amber-10: color-mix(in srgb, var(--amber-color) 10%, transparent);
+  --amber-30: color-mix(in srgb, var(--amber-color) 30%, transparent);
+  --destructive-color: var(--error-color);
+  --destructive-10: color-mix(in srgb, var(--destructive-color) 10%, transparent);
+  --destructive-30: color-mix(in srgb, var(--destructive-color) 30%, transparent);
+  --muted-bg: var(--bg-tertiary);
+  --muted-foreground: var(--text-secondary);
+  --accent-bg: var(--bg-tertiary);
+
+  // Glass effect (blurred surfaces)
+  --glass-blur: 12px;
+  --glass-backdrop-filter: blur(var(--glass-blur));
+  --glass-filter: blur(var(--glass-blur));
+  --glass-bg: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+  --glass-bg-secondary: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  --glass-border: color-mix(in srgb, var(--border-color) 60%, transparent);
 }
 
 // 纯白主题
@@ -64,6 +89,8 @@
   --bg-hover: var(--bg-tertiary);
   --bg-quinary: #ffffff;
   --bg-error-light: rgba(198, 87, 70, 0.08);
+  --floating-surface: #ffffff;
+  --floating-shadow: 0 12px 26px rgba(0, 0, 0, 0.12);
 
   --text-primary: #2d2a26;
   --text-secondary: #6d6760;
@@ -82,6 +109,7 @@
   --primary-contrast: #ffffff;
 
   --success-color: #10b981;
+  --quota-medium-color: #e0aa14;
   --warning-color: #c65746;
   --error-color: #c65746;
   --danger-color: var(--error-color);
@@ -106,7 +134,21 @@
   --shadow-lg: 0 10px 18px -3px rgb(0 0 0 / 0.1);
 
   --radius-md: 8px;
-  --accent-tertiary: var(--bg-tertiary);
+
+  // Workbench tokens (Home parity)
+  --primary-8: color-mix(in srgb, var(--primary-color) 8%, transparent);
+  --primary-10: color-mix(in srgb, var(--primary-color) 10%, transparent);
+  --primary-30: color-mix(in srgb, var(--primary-color) 30%, transparent);
+  --amber-color: #d97706;
+  --amber-text: #92400e;
+  --amber-10: color-mix(in srgb, var(--amber-color) 10%, transparent);
+  --amber-30: color-mix(in srgb, var(--amber-color) 30%, transparent);
+  --destructive-color: var(--error-color);
+  --destructive-10: color-mix(in srgb, var(--destructive-color) 10%, transparent);
+  --destructive-30: color-mix(in srgb, var(--destructive-color) 30%, transparent);
+  --muted-bg: var(--bg-tertiary);
+  --muted-foreground: var(--text-secondary);
+  --accent-bg: var(--bg-tertiary);
 }
 
 // 深色主题（#191919）
@@ -118,6 +160,8 @@
   --bg-hover: #2e2a26;
   --bg-quinary: #191714;
   --bg-error-light: rgba(198, 87, 70, 0.18);
+  --floating-surface: #2a2723;
+  --floating-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
 
   --text-primary: #f6f4f1;
   --text-secondary: #c9c3bb;
@@ -136,6 +180,7 @@
   --primary-contrast: #ffffff;
 
   --success-color: #10b981;
+  --quota-medium-color: #ffd862;
   --warning-color: #c65746;
   --error-color: #c65746;
   --danger-color: var(--error-color);
@@ -160,5 +205,33 @@
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3);
 
   --radius-md: 8px;
-  --accent-tertiary: var(--bg-tertiary);
+
+  // Workbench tokens (Home parity, deeper amber for dark)
+  --primary-8: color-mix(in srgb, var(--primary-color) 8%, transparent);
+  --primary-10: color-mix(in srgb, var(--primary-color) 10%, transparent);
+  --primary-30: color-mix(in srgb, var(--primary-color) 30%, transparent);
+  --amber-color: #f59e0b;
+  --amber-text: #fcd34d;
+  --amber-10: color-mix(in srgb, var(--amber-color) 14%, transparent);
+  --amber-30: color-mix(in srgb, var(--amber-color) 38%, transparent);
+  --destructive-color: var(--error-color);
+  --destructive-10: color-mix(in srgb, var(--destructive-color) 14%, transparent);
+  --destructive-30: color-mix(in srgb, var(--destructive-color) 38%, transparent);
+  --muted-bg: var(--bg-tertiary);
+  --muted-foreground: var(--text-secondary);
+  --accent-bg: var(--bg-tertiary);
+
+  --glass-border: color-mix(in srgb, var(--border-color) 55%, transparent);
+}
+
+@media (max-width: 768px),
+  (prefers-reduced-motion: reduce),
+  (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-backdrop-filter: none;
+    --glass-filter: none;
+    --glass-bg: var(--bg-primary);
+    --glass-bg-secondary: var(--bg-secondary);
+    --glass-border: var(--border-color);
+  }
 }

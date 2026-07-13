@@ -7,30 +7,33 @@ import type {
   AntigravityQuotaState,
   ClaudeQuotaState,
   CodexQuotaState,
-  GeminiCliQuotaState,
   GithubCopilotQuotaState,
-  KimiQuotaState
+  KimiQuotaState,
+  XaiQuotaState,
 } from '@/types';
 
 type QuotaUpdater<T> = T | ((prev: T) => T);
 
 interface QuotaStoreState {
+  cacheGeneration: number;
   antigravityQuota: Record<string, AntigravityQuotaState>;
   claudeQuota: Record<string, ClaudeQuotaState>;
   codexQuota: Record<string, CodexQuotaState>;
-  geminiCliQuota: Record<string, GeminiCliQuotaState>;
   kimiQuota: Record<string, KimiQuotaState>;
+  xaiQuota: Record<string, XaiQuotaState>;
   githubCopilotQuota: Record<string, GithubCopilotQuotaState>;
   setAntigravityQuota: (updater: QuotaUpdater<Record<string, AntigravityQuotaState>>) => void;
   setClaudeQuota: (updater: QuotaUpdater<Record<string, ClaudeQuotaState>>) => void;
   setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;
-  setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
-  setGithubCopilotQuota: (updater: QuotaUpdater<Record<string, GithubCopilotQuotaState>>) => void;
+  setXaiQuota: (updater: QuotaUpdater<Record<string, XaiQuotaState>>) => void;
+  setGithubCopilotQuota: (
+    updater: QuotaUpdater<Record<string, GithubCopilotQuotaState>>
+  ) => void;
   clearQuotaCache: () => void;
 }
 
-const resolveUpdater = <T,>(updater: QuotaUpdater<T>, prev: T): T => {
+const resolveUpdater = <T>(updater: QuotaUpdater<T>, prev: T): T => {
   if (typeof updater === 'function') {
     return (updater as (value: T) => T)(prev);
   }
@@ -38,43 +41,57 @@ const resolveUpdater = <T,>(updater: QuotaUpdater<T>, prev: T): T => {
 };
 
 export const useQuotaStore = create<QuotaStoreState>((set) => ({
+  cacheGeneration: 0,
   antigravityQuota: {},
   claudeQuota: {},
   codexQuota: {},
-  geminiCliQuota: {},
   kimiQuota: {},
+  xaiQuota: {},
   githubCopilotQuota: {},
   setAntigravityQuota: (updater) =>
     set((state) => ({
-      antigravityQuota: resolveUpdater(updater, state.antigravityQuota)
+      antigravityQuota: resolveUpdater(updater, state.antigravityQuota),
     })),
   setClaudeQuota: (updater) =>
     set((state) => ({
-      claudeQuota: resolveUpdater(updater, state.claudeQuota)
+      claudeQuota: resolveUpdater(updater, state.claudeQuota),
     })),
   setCodexQuota: (updater) =>
     set((state) => ({
-      codexQuota: resolveUpdater(updater, state.codexQuota)
-    })),
-  setGeminiCliQuota: (updater) =>
-    set((state) => ({
-      geminiCliQuota: resolveUpdater(updater, state.geminiCliQuota)
+      codexQuota: resolveUpdater(updater, state.codexQuota),
     })),
   setKimiQuota: (updater) =>
     set((state) => ({
-      kimiQuota: resolveUpdater(updater, state.kimiQuota)
+      kimiQuota: resolveUpdater(updater, state.kimiQuota),
+    })),
+  setXaiQuota: (updater) =>
+    set((state) => ({
+      xaiQuota: resolveUpdater(updater, state.xaiQuota),
     })),
   setGithubCopilotQuota: (updater) =>
     set((state) => ({
-      githubCopilotQuota: resolveUpdater(updater, state.githubCopilotQuota)
+      githubCopilotQuota: resolveUpdater(updater, state.githubCopilotQuota),
     })),
   clearQuotaCache: () =>
-    set({
+    set((state) => ({
+      cacheGeneration: state.cacheGeneration + 1,
       antigravityQuota: {},
       claudeQuota: {},
       codexQuota: {},
-      geminiCliQuota: {},
       kimiQuota: {},
-      githubCopilotQuota: {}
-    })
+      xaiQuota: {},
+      githubCopilotQuota: {},
+    })),
 }));
+
+export const captureQuotaCacheGeneration = (): number =>
+  useQuotaStore.getState().cacheGeneration;
+
+export const commitIfQuotaCacheCurrent = (
+  generation: number,
+  commit: () => void
+): boolean => {
+  if (useQuotaStore.getState().cacheGeneration !== generation) return false;
+  commit();
+  return true;
+};

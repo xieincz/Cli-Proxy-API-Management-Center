@@ -5,6 +5,8 @@
 import { useTranslation } from 'react-i18next';
 import type { ReactElement, ReactNode } from 'react';
 import type { TFunction } from 'i18next';
+import { Button } from '@/components/ui/Button';
+import { IconRefreshCw } from '@/components/ui/icons';
 import type { AuthFileItem, ResolvedTheme, ThemeColors } from '@/types';
 import { TYPE_COLORS } from '@/utils/quota';
 import styles from '@/pages/QuotaPage.module.scss';
@@ -26,10 +28,9 @@ export interface QuotaProgressBarProps {
 export function QuotaProgressBar({
   percent,
   highThreshold,
-  mediumThreshold
+  mediumThreshold,
 }: QuotaProgressBarProps) {
-  const clamp = (value: number, min: number, max: number) =>
-    Math.min(max, Math.max(min, value));
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
   const normalized = percent === null ? null : clamp(percent, 0, 100);
   const fillClass =
     normalized === null
@@ -39,7 +40,7 @@ export function QuotaProgressBar({
         : normalized >= mediumThreshold
           ? styles.quotaBarFillMedium
           : styles.quotaBarFillLow;
-  const widthPercent = Math.round(normalized ?? 0);
+  const widthPercent = Math.round((normalized ?? 0) * 100) / 100;
 
   return (
     <div className={styles.quotaBar}>
@@ -61,9 +62,11 @@ interface QuotaCardProps<TState extends QuotaStatusState> {
   quota?: TState;
   resolvedTheme: ResolvedTheme;
   i18nPrefix: string;
-  cardIdleMessageKey?: string;
   cardClassName: string;
   defaultType: string;
+  canRefresh?: boolean;
+  onRefresh?: () => void;
+  resetQuotaAction?: ReactNode;
   renderQuotaItems: (quota: TState, t: TFunction, helpers: QuotaRenderHelpers) => ReactNode;
 }
 
@@ -72,10 +75,12 @@ export function QuotaCard<TState extends QuotaStatusState>({
   quota,
   resolvedTheme,
   i18nPrefix,
-  cardIdleMessageKey,
   cardClassName,
   defaultType,
-  renderQuotaItems
+  canRefresh = false,
+  onRefresh,
+  resetQuotaAction,
+  renderQuotaItems,
 }: QuotaCardProps<TState>) {
   const { t } = useTranslation();
 
@@ -85,12 +90,13 @@ export function QuotaCard<TState extends QuotaStatusState>({
     resolvedTheme === 'dark' && typeColorSet.dark ? typeColorSet.dark : typeColorSet.light;
 
   const quotaStatus = quota?.status ?? 'idle';
+  const quotaLoading = quotaStatus === 'loading';
   const quotaErrorMessage = resolveQuotaErrorMessage(
     t,
     quota?.errorStatus,
     quota?.error || t('common.unknown_error')
   );
-  const idleMessageKey = cardIdleMessageKey ?? `${i18nPrefix}.idle`;
+  const idleMessageKey = `${i18nPrefix}.idle`;
 
   const getTypeLabel = (type: string): string => {
     const key = `auth_files.filter_${type}`;
@@ -108,7 +114,7 @@ export function QuotaCard<TState extends QuotaStatusState>({
           style={{
             backgroundColor: typeColor.bg,
             color: typeColor.text,
-            ...(typeColor.border ? { border: typeColor.border } : {})
+            ...(typeColor.border ? { border: typeColor.border } : {}),
           }}
         >
           {getTypeLabel(displayType)}
@@ -117,14 +123,25 @@ export function QuotaCard<TState extends QuotaStatusState>({
       </div>
 
       <div className={styles.quotaSection}>
-        {quotaStatus === 'loading' ? (
+        {quotaLoading ? (
           <div className={styles.quotaMessage}>{t(`${i18nPrefix}.loading`)}</div>
         ) : quotaStatus === 'idle' ? (
-          <div className={styles.quotaMessage}>{t(idleMessageKey)}</div>
+          onRefresh ? (
+            <button
+              type="button"
+              className={`${styles.quotaMessage} ${styles.quotaMessageAction}`}
+              onClick={onRefresh}
+              disabled={!canRefresh}
+            >
+              {t(idleMessageKey)}
+            </button>
+          ) : (
+            <div className={styles.quotaMessage}>{t(idleMessageKey)}</div>
+          )
         ) : quotaStatus === 'error' ? (
           <div className={styles.quotaError}>
             {t(`${i18nPrefix}.load_failed`, {
-              message: quotaErrorMessage
+              message: quotaErrorMessage,
             })}
           </div>
         ) : quota ? (
@@ -133,6 +150,27 @@ export function QuotaCard<TState extends QuotaStatusState>({
           <div className={styles.quotaMessage}>{t(idleMessageKey)}</div>
         )}
       </div>
+
+      {(resetQuotaAction || (onRefresh && quotaStatus !== 'idle')) && (
+        <div className={styles.quotaCardActions}>
+          {resetQuotaAction}
+          {onRefresh && quotaStatus !== 'idle' && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className={styles.quotaRefreshButton}
+              onClick={onRefresh}
+              disabled={!canRefresh || quotaLoading}
+              loading={quotaLoading}
+              title={t('auth_files.quota_refresh_hint')}
+            >
+              {!quotaLoading && <IconRefreshCw size={14} />}
+              {t('auth_files.quota_refresh_single')}
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -7,11 +7,25 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { AutocompleteInput } from '@/components/ui/AutocompleteInput';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { IconInfo } from '@/components/ui/icons';
+import { IconInfo, IconX } from '@/components/ui/icons';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { useAuthStore, useNotificationStore } from '@/stores';
 import { authFilesApi } from '@/services/api';
+import {
+  buildOAuthProviderOptions,
+  getTypeLabel,
+  normalizeProviderKey,
+} from '@/features/authFiles/constants';
+import { getStringSetSignature, isOAuthEditorDirty } from '@/features/authFiles/oauthEditorState';
+import {
+  getCustomOAuthExcludedRules,
+  getEffectiveOAuthExcludedRules,
+  hasOAuthExcludedRule,
+  normalizeOAuthExcludedRules,
+  updateOAuthExcludedRule,
+} from '@/features/authFiles/oauthExcludedRules';
 import type { AuthFileItem, OAuthModelAliasEntry } from '@/types';
 import styles from './AuthFilesOAuthExcludedEditPage.module.scss';
 
@@ -19,32 +33,17 @@ type AuthFileModelItem = { id: string; display_name?: string; type?: string; own
 
 type LocationState = { fromAuthFiles?: boolean } | null;
 
-const OAUTH_PROVIDER_PRESETS = [
-  'gemini-cli',
-  'vertex',
-  'aistudio',
-  'antigravity',
-  'claude',
-  'codex',
-  'qwen',
-  'kimi',
-  'iflow',
-];
-
-const OAUTH_PROVIDER_EXCLUDES = new Set(['all', 'unknown', 'empty']);
-
-const normalizeProviderKey = (value: string) => value.trim().toLowerCase();
-
 export function AuthFilesOAuthExcludedEditPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { showNotification } = useNotificationStore();
+  const { showConfirmation, showNotification } = useNotificationStore();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const disableControls = connectionStatus !== 'connected';
 
   const [searchParams, setSearchParams] = useSearchParams();
   const providerFromParams = searchParams.get('provider') ?? '';
+  const [initialProviderKey] = useState(() => normalizeProviderKey(providerFromParams));
 
   const [provider, setProvider] = useState(providerFromParams);
   const [files, setFiles] = useState<AuthFileItem[]>([]);
@@ -57,6 +56,7 @@ export function AuthFilesOAuthExcludedEditPage() {
   const [modelsList, setModelsList] = useState<AuthFileModelItem[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<'unsupported' | null>(null);
+  const [customRule, setCustomRule] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -76,34 +76,54 @@ export function AuthFilesOAuthExcludedEditPage() {
       }
     });
 
-    const normalizedExtras = Array.from(extraProviders)
-      .map((value) => value.trim())
-      .filter((value) => value && !OAUTH_PROVIDER_EXCLUDES.has(value.toLowerCase()));
-
-    const baseSet = new Set(OAUTH_PROVIDER_PRESETS.map((value) => value.toLowerCase()));
-    const extraList = normalizedExtras
-      .filter((value) => !baseSet.has(value.toLowerCase()))
-      .sort((a, b) => a.localeCompare(b));
-
-    return [...OAUTH_PROVIDER_PRESETS, ...extraList];
+    return buildOAuthProviderOptions(extraProviders);
   }, [excluded, files, modelAlias]);
-
-  const getTypeLabel = useCallback(
-    (type: string): string => {
-      const key = `auth_files.filter_${type}`;
-      const translated = t(key);
-      if (translated !== key) return translated;
-      if (type.toLowerCase() === 'iflow') return 'iFlow';
-      return type.charAt(0).toUpperCase() + type.slice(1);
-    },
-    [t]
-  );
 
   const resolvedProviderKey = useMemo(() => normalizeProviderKey(provider), [provider]);
   const isEditing = useMemo(() => {
     if (!resolvedProviderKey) return false;
     return Object.prototype.hasOwnProperty.call(excluded, resolvedProviderKey);
   }, [excluded, resolvedProviderKey]);
+  const baselineModelsSignature = useMemo(
+    () => getStringSetSignature(normalizeOAuthExcludedRules(excluded[resolvedProviderKey] ?? [])),
+    [excluded, resolvedProviderKey]
+  );
+  const effectiveRules = useMemo(
+    () => getEffectiveOAuthExcludedRules(selectedModels, customRule),
+    [customRule, selectedModels]
+  );
+  const effectiveRulesSignature = useMemo(
+    () => getStringSetSignature(effectiveRules),
+    [effectiveRules]
+  );
+  const contentDirty = baselineModelsSignature !== effectiveRulesSignature;
+  const customRules = useMemo(
+    () =>
+      getCustomOAuthExcludedRules(
+        selectedModels,
+        modelsList.map((model) => model.id)
+      ),
+    [modelsList, selectedModels]
+  );
+  const isDirty = isOAuthEditorDirty(
+    initialProviderKey,
+    provider,
+    baselineModelsSignature,
+    effectiveRulesSignature
+  );
+  const unsavedChangesDialog = useMemo(
+    () => ({
+      title: t('common.unsaved_changes_title'),
+      message: t('common.unsaved_changes_message'),
+      confirmText: t('common.leave'),
+      cancelText: t('common.stay'),
+    }),
+    [t]
+  );
+  const { allowNextNavigation, allowNavigationTo } = useUnsavedChangesGuard({
+    shouldBlock: isDirty,
+    dialog: unsavedChangesDialog,
+  });
 
   const title = useMemo(() => {
     if (isEditing) {
@@ -195,7 +215,8 @@ export function AuthFilesOAuthExcludedEditPage() {
       return;
     }
     const existing = excluded[resolvedProviderKey] ?? [];
-    setSelectedModels(new Set(existing));
+    setSelectedModels(new Set(normalizeOAuthExcludedRules(existing)));
+    setCustomRule('');
   }, [excluded, resolvedProviderKey]);
 
   useEffect(() => {
@@ -207,6 +228,7 @@ export function AuthFilesOAuthExcludedEditPage() {
     }
 
     let cancelled = false;
+    setModelsList([]);
     setModelsLoading(true);
     setModelsError(null);
 
@@ -223,7 +245,7 @@ export function AuthFilesOAuthExcludedEditPage() {
             ? (err as { status?: unknown }).status
             : undefined;
 
-        if (status === 404) {
+        if (status === 400 || status === 404) {
           setModelsList([]);
           setModelsError('unsupported');
           return;
@@ -242,7 +264,7 @@ export function AuthFilesOAuthExcludedEditPage() {
     };
   }, [excludedUnsupported, resolvedProviderKey, showNotification, t]);
 
-  const updateProvider = useCallback(
+  const applyProviderChange = useCallback(
     (value: string) => {
       setProvider(value);
       const next = new URLSearchParams(searchParams);
@@ -252,22 +274,39 @@ export function AuthFilesOAuthExcludedEditPage() {
       } else {
         next.delete('provider');
       }
+      const nextSearch = next.toString();
+      allowNavigationTo(
+        `${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${location.hash}`
+      );
       setSearchParams(next, { replace: true });
     },
-    [searchParams, setSearchParams]
+    [allowNavigationTo, location.hash, location.pathname, searchParams, setSearchParams]
+  );
+
+  const updateProvider = useCallback(
+    (value: string) => {
+      if (!contentDirty || normalizeProviderKey(value) === resolvedProviderKey) {
+        applyProviderChange(value);
+        return;
+      }
+      showConfirmation({
+        ...unsavedChangesDialog,
+        variant: 'danger',
+        onConfirm: () => applyProviderChange(value),
+      });
+    },
+    [applyProviderChange, contentDirty, resolvedProviderKey, showConfirmation, unsavedChangesDialog]
   );
 
   const toggleModel = useCallback((modelId: string, checked: boolean) => {
-    setSelectedModels((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        next.add(modelId);
-      } else {
-        next.delete(modelId);
-      }
-      return next;
-    });
+    setSelectedModels((prev) => new Set(updateOAuthExcludedRule(prev, modelId, checked)));
   }, []);
+
+  const handleAddCustomRule = useCallback(() => {
+    if (!customRule.trim()) return;
+    setSelectedModels(new Set(effectiveRules));
+    setCustomRule('');
+  }, [customRule, effectiveRules]);
 
   const handleSave = useCallback(async () => {
     const normalizedProvider = normalizeProviderKey(provider);
@@ -276,15 +315,16 @@ export function AuthFilesOAuthExcludedEditPage() {
       return;
     }
 
-    const models = [...selectedModels];
+    const models = effectiveRules;
     setSaving(true);
     try {
       if (models.length) {
         await authFilesApi.saveOauthExcludedModels(normalizedProvider, models);
-      } else {
+      } else if (isEditing) {
         await authFilesApi.deleteOauthExcludedEntry(normalizedProvider);
       }
       showNotification(t('oauth_excluded.save_success'), 'success');
+      allowNextNavigation();
       handleBack();
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : '';
@@ -292,7 +332,7 @@ export function AuthFilesOAuthExcludedEditPage() {
     } finally {
       setSaving(false);
     }
-  }, [handleBack, provider, selectedModels, showNotification, t]);
+  }, [allowNextNavigation, effectiveRules, handleBack, isEditing, provider, showNotification, t]);
 
   const canSave = !disableControls && !saving && !excludedUnsupported;
 
@@ -352,7 +392,8 @@ export function AuthFilesOAuthExcludedEditPage() {
               {providerOptions.length > 0 && (
                 <div className={styles.tagList}>
                   {providerOptions.map((option) => {
-                    const isActive = normalizeProviderKey(provider) === option.toLowerCase();
+                    const isActive =
+                      normalizeProviderKey(provider) === normalizeProviderKey(option);
                     return (
                       <button
                         key={option}
@@ -361,7 +402,7 @@ export function AuthFilesOAuthExcludedEditPage() {
                         onClick={() => updateProvider(option)}
                         disabled={disableControls || saving}
                       >
-                        {getTypeLabel(option)}
+                        {getTypeLabel(t, option)}
                       </button>
                     );
                   })}
@@ -391,6 +432,64 @@ export function AuthFilesOAuthExcludedEditPage() {
               )}
             </div>
 
+            <div className={styles.customRuleSection}>
+              <div className={styles.customRuleHeader}>
+                <label className={styles.settingsLabel} htmlFor="oauth-excluded-custom-rule">
+                  {t('oauth_excluded.custom_rule_label')}
+                </label>
+                <div className={styles.settingsDesc}>{t('oauth_excluded.custom_rule_hint')}</div>
+              </div>
+              <div className={styles.customRuleRow}>
+                <input
+                  id="oauth-excluded-custom-rule"
+                  className={`input ${styles.customRuleInput}`}
+                  value={customRule}
+                  onChange={(event) => setCustomRule(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleAddCustomRule();
+                    }
+                  }}
+                  placeholder={t('oauth_excluded.custom_rule_placeholder')}
+                  disabled={!resolvedProviderKey || disableControls || saving}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleAddCustomRule}
+                  disabled={!resolvedProviderKey || !customRule.trim() || disableControls || saving}
+                >
+                  {t('oauth_excluded.custom_rule_add')}
+                </Button>
+              </div>
+
+              {customRules.length > 0 && (
+                <div className={styles.customRuleList}>
+                  <div className={styles.customRuleListLabel}>
+                    {t('oauth_excluded.custom_rules_label')}
+                  </div>
+                  <div className={styles.customRuleChips}>
+                    {customRules.map((rule) => (
+                      <span key={rule.toLowerCase()} className={styles.customRuleChip}>
+                        <span>{rule}</span>
+                        <button
+                          type="button"
+                          className={styles.customRuleRemove}
+                          onClick={() => toggleModel(rule, false)}
+                          disabled={disableControls || saving}
+                          aria-label={t('oauth_excluded.custom_rule_remove', { rule })}
+                        >
+                          <IconX size={13} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {modelsLoading ? (
               <div className={styles.loadingModels}>
                 <LoadingSpinner size={16} />
@@ -399,7 +498,7 @@ export function AuthFilesOAuthExcludedEditPage() {
             ) : modelsList.length > 0 ? (
               <div className={styles.modelList}>
                 {modelsList.map((model) => {
-                  const checked = selectedModels.has(model.id);
+                  const checked = hasOAuthExcludedRule(selectedModels, model.id);
                   return (
                     <SelectionCheckbox
                       key={model.id}

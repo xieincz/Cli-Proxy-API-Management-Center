@@ -236,7 +236,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
               showNotification(`${t('oauth_excluded.delete_failed')}: ${errorMessage}`, 'error');
             }
           }
-        }
+        },
       });
     },
     [loadExcluded, showConfirmation, showNotification, t]
@@ -258,7 +258,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
             const errorMessage = err instanceof Error ? err.message : '';
             showNotification(`${t('oauth_model_alias.delete_failed')}: ${errorMessage}`, 'error');
           }
-        }
+        },
       });
     },
     [loadModelAlias, showConfirmation, showNotification, t]
@@ -292,7 +292,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
 
       const nextMappings: OAuthModelAliasEntry[] = [
         ...currentMappings,
-        { name: nameTrim, alias: aliasTrim, fork: true }
+        { name: nameTrim, alias: aliasTrim, fork: true },
       ];
 
       try {
@@ -351,7 +351,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
             const errorMessage = err instanceof Error ? err.message : '';
             showNotification(`${t('oauth_model_alias.save_failed')}: ${errorMessage}`, 'error');
           }
-        }
+        },
       });
     },
     [loadModelAlias, modelAlias, showConfirmation, showNotification, t]
@@ -375,7 +375,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
         const mAlias = (m.alias ?? '').trim().toLowerCase();
         if (mName === nameKey && mAlias === aliasKey) {
           changed = true;
-          return fork ? { ...m, fork: true } : { name: m.name, alias: m.alias };
+          return fork ? { ...m, fork: true } : { ...m, fork: undefined };
         }
         return m;
       });
@@ -539,7 +539,7 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
           } else {
             showNotification(t('oauth_model_alias.delete_success'), 'success');
           }
-        }
+        },
       });
     },
     [loadModelAlias, modelAlias, showConfirmation, showNotification, t]
@@ -561,7 +561,6 @@ export function useAuthFilesOauth(options: UseAuthFilesOauthOptions): UseAuthFil
     handleDeleteLink,
     handleToggleFork,
     handleRenameAlias,
-    handleDeleteAlias
+    handleDeleteAlias,
   };
 }
-

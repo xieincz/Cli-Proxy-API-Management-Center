@@ -2,57 +2,49 @@
  * Quota constants for API URLs, headers, and theme colors.
  */
 
-import type {
-  AntigravityQuotaGroupDefinition,
-  GeminiCliQuotaGroupDefinition,
-  TypeColorSet,
-} from '@/types';
+import type { TypeColorSet } from '@/types';
 
-// Theme colors for type badges
+// Theme colors for type badges — 与 authFiles/constants.ts 保持同步
 export const TYPE_COLORS: Record<string, TypeColorSet> = {
   qwen: {
-    light: { bg: '#e8f5e9', text: '#2e7d32' },
-    dark: { bg: '#1b5e20', text: '#81c784' },
+    light: { bg: '#ede5fd', text: '#5530c7' },
+    dark: { bg: '#36208a', text: '#b5a3f0' },
   },
   gemini: {
     light: { bg: '#e3f2fd', text: '#1565c0' },
     dark: { bg: '#0d47a1', text: '#64b5f6' },
-  },
-  'gemini-cli': {
-    light: { bg: '#e7efff', text: '#1e4fa3' },
-    dark: { bg: '#1c3f73', text: '#a8c7ff' },
   },
   aistudio: {
     light: { bg: '#f0f2f5', text: '#2f343c' },
     dark: { bg: '#373c42', text: '#cfd3db' },
   },
   claude: {
-    light: { bg: '#fce4ec', text: '#c2185b' },
-    dark: { bg: '#880e4f', text: '#f48fb1' },
+    light: { bg: '#fbece4', text: '#c05621' },
+    dark: { bg: '#5e2c14', text: '#e8a882' },
   },
   codex: {
-    light: { bg: '#fff3e0', text: '#ef6c00' },
-    dark: { bg: '#e65100', text: '#ffb74d' },
+    light: { bg: '#eae7ff', text: '#3538d4' },
+    dark: { bg: '#262395', text: '#b5b0ff' },
   },
   kimi: {
-    light: { bg: '#fff4e5', text: '#ad6800' },
-    dark: { bg: '#7c4a03', text: '#ffd591' },
+    light: { bg: '#dce8ff', text: '#0560cf' },
+    dark: { bg: '#003880', text: '#70b5ff' },
   },
   antigravity: {
     light: { bg: '#e0f7fa', text: '#006064' },
     dark: { bg: '#004d40', text: '#80deea' },
   },
-  'github-copilot': {
-    light: { bg: '#f3e5f5', text: '#4a148c' },
-    dark: { bg: '#4a148c', text: '#e1bee7' }
-  },
-  github: {
-    light: { bg: '#f3e5f5', text: '#4a148c' },
-    dark: { bg: '#4a148c', text: '#e1bee7' }
+  xai: {
+    light: { bg: '#f3f4f6', text: '#111827', border: '1px solid #d1d5db' },
+    dark: { bg: '#111827', text: '#f9fafb', border: '1px solid #374151' },
   },
   iflow: {
-    light: { bg: '#f3e5f5', text: '#7b1fa2' },
-    dark: { bg: '#4a148c', text: '#ce93d8' },
+    light: { bg: '#f5e3fc', text: '#9025c8' },
+    dark: { bg: '#521490', text: '#d49cf5' },
+  },
+  vertex: {
+    light: { bg: '#e4edfd', text: '#2b5fbc' },
+    dark: { bg: '#1a3d80', text: '#89b3f7' },
   },
   empty: {
     light: { bg: '#f5f5f5', text: '#616161' },
@@ -66,105 +58,43 @@ export const TYPE_COLORS: Record<string, TypeColorSet> = {
 
 // Antigravity API configuration
 export const ANTIGRAVITY_QUOTA_URLS = [
-  'https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
-  'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels',
-  'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
+  'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+  'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary',
+  'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
 ];
+
+export const ANTIGRAVITY_CODE_ASSIST_URL =
+  'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist';
+
+export const ANTIGRAVITY_CLI_VERSION = '1.0.13';
+export const ANTIGRAVITY_CLIENT_NAME = 'aidev_client';
+export const ANTIGRAVITY_CLIENT_PLATFORM = {
+  osType: 'darwin',
+  arch: 'arm64',
+} as const;
+
+type AntigravityUserAgentOptions = {
+  version?: string;
+  clientName?: string;
+  osType?: string;
+  arch?: string;
+};
+
+export const buildAntigravityUserAgent = ({
+  version = ANTIGRAVITY_CLI_VERSION,
+  clientName = ANTIGRAVITY_CLIENT_NAME,
+  osType = ANTIGRAVITY_CLIENT_PLATFORM.osType,
+  arch = ANTIGRAVITY_CLIENT_PLATFORM.arch,
+}: AntigravityUserAgentOptions = {}) =>
+  `antigravity/cli/${version} (${clientName}; os_type=${osType}; arch=${arch})`;
+
+export const ANTIGRAVITY_USER_AGENT = buildAntigravityUserAgent();
 
 export const ANTIGRAVITY_REQUEST_HEADERS = {
   Authorization: 'Bearer $TOKEN$',
   'Content-Type': 'application/json',
-  'User-Agent': 'antigravity/1.11.5 windows/amd64',
+  'User-Agent': ANTIGRAVITY_USER_AGENT,
 };
-
-export const ANTIGRAVITY_QUOTA_GROUPS: AntigravityQuotaGroupDefinition[] = [
-  {
-    id: 'claude-gpt',
-    label: 'Claude/GPT',
-    identifiers: ['claude-sonnet-4-6', 'claude-opus-4-6-thinking', 'gpt-oss-120b-medium'],
-  },
-  {
-    id: 'gemini-3-pro',
-    label: 'Gemini 3 Pro',
-    identifiers: ['gemini-3-pro-high', 'gemini-3-pro-low'],
-  },
-  {
-    id: 'gemini-3-1-pro-series',
-    label: 'Gemini 3.1 Pro Series',
-    identifiers: ['gemini-3.1-pro-high', 'gemini-3.1-pro-low'],
-  },
-  {
-    id: 'gemini-2-5-flash',
-    label: 'Gemini 2.5 Flash',
-    identifiers: ['gemini-2.5-flash', 'gemini-2.5-flash-thinking'],
-  },
-  {
-    id: 'gemini-2-5-flash-lite',
-    label: 'Gemini 2.5 Flash Lite',
-    identifiers: ['gemini-2.5-flash-lite'],
-  },
-  {
-    id: 'gemini-2-5-cu',
-    label: 'Gemini 2.5 CU',
-    identifiers: ['rev19-uic3-1p'],
-  },
-  {
-    id: 'gemini-3-flash',
-    label: 'Gemini 3 Flash',
-    identifiers: ['gemini-3-flash'],
-  },
-  {
-    id: 'gemini-image',
-    label: 'gemini-3.1-flash-image',
-    identifiers: ['gemini-3.1-flash-image'],
-    labelFromModel: true,
-  },
-];
-
-// Gemini CLI API configuration
-export const GEMINI_CLI_QUOTA_URL =
-  'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota';
-
-export const GEMINI_CLI_CODE_ASSIST_URL =
-  'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist';
-
-export const GEMINI_CLI_REQUEST_HEADERS = {
-  Authorization: 'Bearer $TOKEN$',
-  'Content-Type': 'application/json',
-};
-
-export const GEMINI_CLI_QUOTA_GROUPS: GeminiCliQuotaGroupDefinition[] = [
-  {
-    id: 'gemini-flash-lite-series',
-    label: 'Gemini Flash Lite Series',
-    preferredModelId: 'gemini-2.5-flash-lite',
-    modelIds: ['gemini-2.5-flash-lite'],
-  },
-  {
-    id: 'gemini-flash-series',
-    label: 'Gemini Flash Series',
-    preferredModelId: 'gemini-3-flash-preview',
-    modelIds: ['gemini-3-flash-preview', 'gemini-2.5-flash'],
-  },
-  {
-    id: 'gemini-pro-series',
-    label: 'Gemini Pro Series',
-    preferredModelId: 'gemini-3.1-pro-preview',
-    modelIds: ['gemini-3.1-pro-preview', 'gemini-3-pro-preview', 'gemini-2.5-pro'],
-  },
-];
-
-export const GEMINI_CLI_GROUP_ORDER = new Map(
-  GEMINI_CLI_QUOTA_GROUPS.map((group, index) => [group.id, index] as const)
-);
-
-export const GEMINI_CLI_GROUP_LOOKUP = new Map(
-  GEMINI_CLI_QUOTA_GROUPS.flatMap((group) =>
-    group.modelIds.map((modelId) => [modelId, group] as const)
-  )
-);
-
-export const GEMINI_CLI_IGNORED_MODEL_PREFIXES = ['gemini-2.0-flash'];
 
 // Claude API configuration
 export const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
@@ -180,7 +110,11 @@ export const CLAUDE_REQUEST_HEADERS = {
 export const CLAUDE_USAGE_WINDOW_KEYS = [
   { key: 'five_hour', id: 'five-hour', labelKey: 'claude_quota.five_hour' },
   { key: 'seven_day', id: 'seven-day', labelKey: 'claude_quota.seven_day' },
-  { key: 'seven_day_oauth_apps', id: 'seven-day-oauth-apps', labelKey: 'claude_quota.seven_day_oauth_apps' },
+  {
+    key: 'seven_day_oauth_apps',
+    id: 'seven-day-oauth-apps',
+    labelKey: 'claude_quota.seven_day_oauth_apps',
+  },
   { key: 'seven_day_opus', id: 'seven-day-opus', labelKey: 'claude_quota.seven_day_opus' },
   { key: 'seven_day_sonnet', id: 'seven-day-sonnet', labelKey: 'claude_quota.seven_day_sonnet' },
   { key: 'seven_day_cowork', id: 'seven-day-cowork', labelKey: 'claude_quota.seven_day_cowork' },
@@ -189,6 +123,10 @@ export const CLAUDE_USAGE_WINDOW_KEYS = [
 
 // Codex API configuration
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+export const CODEX_RATE_LIMIT_RESET_CREDITS_URL =
+  'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
+export const CODEX_RATE_LIMIT_RESET_CREDITS_CONSUME_URL =
+  'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume';
 
 export const CODEX_REQUEST_HEADERS = {
   Authorization: 'Bearer $TOKEN$',
@@ -203,14 +141,26 @@ export const KIMI_REQUEST_HEADERS = {
   Authorization: 'Bearer $TOKEN$',
 };
 
-// GitHub Copilot API configuration
+// xAI/Grok API configuration
+export const XAI_BILLING_WEEKLY_URL = 'https://cli-chat-proxy.grok.com/v1/billing?format=credits';
+export const XAI_BILLING_MONTHLY_URL = 'https://cli-chat-proxy.grok.com/v1/billing';
+export const XAI_GROK_CLIENT_VERSION = '0.2.91';
+export const XAI_GROK_USER_AGENT = 'grok-pager/0.2.91 grok-shell/0.2.91 (macos; aarch64)';
+
+export const XAI_REQUEST_HEADERS = {
+  Authorization: 'Bearer $TOKEN$',
+  'x-xai-token-auth': 'xai-grok-cli',
+  'x-grok-client-version': XAI_GROK_CLIENT_VERSION,
+  accept: '*/*',
+  'user-agent': XAI_GROK_USER_AGENT,
+};
+
 export const GITHUB_COPILOT_TOKEN_URL = 'https://api.github.com/copilot_internal/v2/token';
 export const GITHUB_COPILOT_USER_URL = 'https://api.github.com/copilot_internal/user';
-
 export const GITHUB_COPILOT_REQUEST_HEADERS = {
   Authorization: 'token $TOKEN$',
   Accept: 'application/json',
   'User-Agent': 'GithubCopilot/1.0',
   'Editor-Version': 'vscode/1.100.0',
-  'Editor-Plugin-Version': 'copilot/1.300.0'
+  'Editor-Plugin-Version': 'copilot/1.300.0',
 };
