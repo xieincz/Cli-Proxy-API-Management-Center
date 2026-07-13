@@ -1,0 +1,113 @@
+name: Build and Release Dev
+
+on:
+  push:
+    branches:
+      - dev
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 不指定 ref，让 checkout 精确签出触发本次运行的 commit。
+      # 这样即使 dev 在排队期间又有新提交，也不会构建错误的提交。
+      - name: Checkout triggering commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # 新版上游使用 Bun；旧版 dev 没有 bun.lock 时跳过此步骤。
+      - name: Setup Bun
+        if: ${{ hashFiles('bun.lock') != '' }}
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -f bun.lock ]]; then
+            echo "Detected bun.lock; using Bun."
+            bun install --frozen-lockfile
+          elif [[ -f package-lock.json ]]; then
+            echo "Detected package-lock.json; using npm."
+            npm ci
+          else
+            echo "::error::Neither bun.lock nor package-lock.json was found."
+            exit 1
+          fi
+
+      - name: Build all-in-one HTML
+        shell: bash
+        env:
+          VERSION: dev-${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -f bun.lock ]]; then
+            bun run build
+          elif [[ -f package-lock.json ]]; then
+            npm run build
+          else
+            echo "::error::No supported lockfile was found."
+            exit 1
+          fi
+
+      - name: Prepare release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f dist/index.html ]]; then
+            echo "::error::Build output dist/index.html was not found."
+            exit 1
+          fi
+
+          mv dist/index.html dist/management.html
+          ls -lh dist/management.html
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          short_sha="${GITHUB_SHA:0:7}"
+          commit_subject="$(git log -1 --pretty=format:%s)"
+          commit_author="$(git log -1 --pretty=format:%an)"
+          commit_date="$(git log -1 --date=iso-strict --pretty=format:%ad)"
+
+          {
+            echo "Automated development build from the \`dev\` branch."
+            echo
+            echo "- Commit: [\`${short_sha}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
+            echo "- Message: ${commit_subject}"
+            echo "- Author: ${commit_author}"
+            echo "- Date: ${commit_date}"
+          } > release-notes.md
+
+      - name: Create or update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-${{ github.sha }}
+          target_commitish: ${{ github.sha }}
+          name: Dev Build (${{ github.sha }})
+          files: dist/management.html
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
